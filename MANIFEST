@@ -1,0 +1,18 @@
+Build.PL
+Changes
+MANIFEST
+META.yml # Will be created by "make dist"
+Makefile.PL
+README
+lib/Contextual/Return.pm
+t/00.load.t
+t/SCALAR.t
+t/args.t
+t/context_tests.t
+t/fail.t
+t/interp.t
+t/nonvoid.t
+t/object.t
+t/pod-coverage.t
+t/pod.t
+t/simple.t
