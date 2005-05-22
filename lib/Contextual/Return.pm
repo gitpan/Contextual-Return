@@ -1,6 +1,6 @@
 package Contextual::Return;
 
-use version; $VERSION = qv('0.0.1');
+use version; $VERSION = qv('0.0.2');
 
 use warnings;
 use strict;
