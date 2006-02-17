@@ -5,6 +5,7 @@ META.yml # Will be created by "make dist"
 Makefile.PL
 README
 lib/Contextual/Return.pm
+lib/Contextual/Return/Failure.pm
 t/00.load.t
 t/SCALAR.t
 t/args.t
@@ -16,3 +17,9 @@ t/object.t
 t/pod-coverage.t
 t/pod.t
 t/simple.t
+t/fail_with.t
+t/failures.t
+t/fixed.t
+t/lazy.t
+t/lvalue.t
+t/scalar-to-list.t

@@ -38,6 +38,25 @@ ok !eval{ foo_bad_obj()->bar }          => 'OBJREF returns bad object';
 like $@,
      qr/\A\QCan't call method 'bar' on OBJREF value returned by main::foo_bad_obj/
                                         => 'Error msg was still correct';
+
+ok !eval{ foo_with_obj()->bad }         => 'Other exceptions propagated';
+like $@, qr/\ABad method! No biscuit!/  => 'Exception msg was correct';
+
+# can_ok() checks against ref $proto || $proto. This bypasses the the
+# obj de-ref that C::R::V provides. isa_ok() does check against the
+# object, but I chose to write it as ok( $foo->isa() ) to maintain
+# consistency and to provide the testname
+
+ok foo_no_obj()->can('bar')
+    => 'can() is checked against the object, not C::R::V';
+
+ok foo_no_obj()->isa('Bar')
+    => 'isa() is checked against the object, not C::R::V';
+
 package Bar;
 
 sub bar { "baaaaa!\n" }
+
+sub bad {
+    die "Bad method! No biscuit!";
+}

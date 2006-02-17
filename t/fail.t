@@ -1,49 +1,60 @@
 use Contextual::Return;
+
 use Test::More 'no_plan';
-use Carp;
 
-sub foo {
-    return
-        BOOL      { carp 'oops! Bool'; 1              }
-        NUM       { carp 'oops! Num'; return 7;       }
-        ARRAYREF  { carp 'oops! Array'; return [1,2]; }
-        HASHREF   { {name=>'foo', value=>42 }         }
-        VOID      { croak 'Enter not the Abyss!';     }
-    ;
+sub eval_nok(&$$) {
+    my ($block, $exception_pat, $message) = @_;
+    my (undef, $file, $line) = caller;
+    eval { $block->() };
+    my $exception = $@;
+    ok $exception => $message;
+    like $exception, qr/\Q$exception_pat\E at $file line $line/ => "Right message";
 }
 
-sub ok_if_warn {
-    my ($msg, $line) = @_;
-    return sub {
-        # diag( "Caught warning: '@_'" );
-        ok $_[0] =~ $msg           => "Warn msg correct at $line";
-        ok $_[0] =~ /line $line\Z/ => "Line number correct at $line";
-    }
+
+sub fail_with_message {
+    return FAIL { 'fail_with_message() failed' }
 }
 
-local $SIG{__WARN__} = ok_if_warn 'oops! Bool', __LINE__+1;
-if (my $foo = foo()) {
-    local $SIG{__WARN__} = ok_if_warn 'oops! Bool', __LINE__+1;
-    ok +($foo?1:0)              => 'BOOLEAN';
-
-    local $SIG{__WARN__} = ok_if_warn 'oops! Num', __LINE__+1;
-    ok "$foo"                   => 'STRING';
-
-    local $SIG{__WARN__} = ok_if_warn 'oops! Array', __LINE__+1;
-    ok  $foo->[0]               => 'ARRAYREF';
-
-    local $SIG{__WARN__} = sub { ok 0 => "Unexpected warning: @_" };
-    is $foo->{name}, 'foo'      => 'HASHREF (name)';
-
-    is $foo->{value}, 42        => 'HASHREF (value)';
+if ( ::fail_with_message() ) {
+    ok 0    => 'Unexpected succeeded in bool context';
+}
+else {
+    ok 1    => 'Failed as expected in bool context';
 }
 
-local $SIG{__WARN__} = ok_if_warn 'oops! Array', __LINE__+1;
-my @bar = foo();
-ok @bar                         => 'LIST via ARRAYREF';
+eval_nok { fail_with_message() }
+    'fail_with_message() failed' => 'Exception thrown in void context';
 
-my $line = __LINE__+1;
-ok !eval { foo(); 1 }           => 'VOID is fatal';
-like $@, qr/Abyss/              => 'Error message is correct';
-like $@, qr/line $line\Z/       => 'Error line is correct';
+eval_nok { () = fail_with_message() }
+    'fail_with_message() failed' => 'Exception thrown in list context';
 
+eval_nok { my $x = fail_with_message(); $x+1 }
+    'fail_with_message() failed' => 'Exception thrown in num context';
+
+eval_nok { my $x = fail_with_message(); $x.'a' }
+    'fail_with_message() failed' => 'Exception thrown in str context';
+
+
+sub fail_auto_message {
+    return FAIL;
+}
+
+if ( ::fail_auto_message() ) {
+    ok 0    => 'Unexpected succeeded in bool context';
+}
+else {
+    ok 1    => 'Failed as expected in bool context';
+}
+
+eval_nok { fail_auto_message() }
+    'Call to main::fail_auto_message() failed' => 'Exception thrown in void context';
+
+eval_nok { () = fail_auto_message() }
+    'Call to main::fail_auto_message() failed' => 'Exception thrown in list context';
+
+eval_nok { my $x = fail_auto_message(); $x+1 }
+    'Call to main::fail_auto_message() failed' => 'Exception thrown in num context';
+
+eval_nok { my $x = fail_auto_message(); $x.'a' }
+    'Call to main::fail_auto_message() failed' => 'Exception thrown in str context';

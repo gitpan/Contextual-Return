@@ -51,3 +51,6 @@ is "There are ${interp_num()} ToDo tasks: @{interp_num()}",
 is "There are ${interp_str()} ToDo tasks: @{interp_str()}",
    'There are 3 ToDo tasks: eat drink be merry'
                                                 => 'String interpolators';
+
+is 0+${interp_str()}, "4"                   => 'Smart numbers';
+is "".${interp_str()}, "3"                  => 'Smart strings';

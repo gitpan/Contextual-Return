@@ -7,3 +7,29 @@ Revision history for Contextual-Return
 0.0.2  Sun May 22 05:48:19 2005
 
     - added dependency on version.pm
+
+
+
+0.1.0  Fri Feb 17 12:15:18 2006
+
+    - added LAZY {...} block for better self-documentation
+
+    - fixed propagation of exceptions from methods called on returned object
+
+    - Added proxying of can() and isa(). (Should VERSION() be done as well?)
+      (thanks, Rob)
+
+    - Added FIXED() to support morphing of scalar return values (thanks, Rob)
+
+    - BACKWARDS INCOMPATIBLE CHANGE:
+      Added fallback to scalar returns for list context
+      To get the old behavior, add:
+        LIST { croak "Can't call this sub in list context" } 
+
+    - Made return values under ${} and @{} remain fully lazy (unless FIXED)
+
+    - Added LVALUE, RVALUE, and NVALUE blocks for implementing lvalue returns
+
+    - Added FAIL block for smart failure
+
+    - Added Contextual::Return::FAIL_WITH to configure FAIL
