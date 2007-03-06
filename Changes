@@ -33,3 +33,24 @@ Revision history for Contextual-Return
     - Added FAIL block for smart failure
 
     - Added Contextual::Return::FAIL_WITH to configure FAIL
+
+
+0.2.0  Tue Mar  6 16:34:54 2007
+
+    - Fixed doc nit (thanks BrowserUK)
+
+    - Fixed test suite under Windows (thanks Nigel and Doug)
+
+    - Fixed doc bugs for FAIL_WITH
+
+    - Removed dependency on Carp internals (now replaces them!)
+
+    - Fixed VOID handling (now correctly falls back to DEFAULT)
+
+    - Fixed caller semantics within handler blocks (thanks Schwern)
+
+    - Fixed edge case of C::R::V metainformation requests (thanks Andrew)
+
+    - Rejigged FIXED/LAZY/ACTIVE
+
+    - Added RESULT and RECOVER blocks (thanks Aaron)

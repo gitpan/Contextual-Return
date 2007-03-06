@@ -10,13 +10,14 @@ sub set_up_1 {
 
     $FAIL_SPEC_ref = {
         good => sub { BOOL { 0     } DEFAULT { croak 'good'} },
-        bad  => sub { BOOL { 1 } DEFAULT { () } },
+        bad  => sub { BOOL { 1     } DEFAULT { ()          } },
         ugly => sub { BOOL { undef } DEFAULT { croak 'ugly'} },
     };
 
     Contextual::Return::FAIL_WITH $FAIL_SPEC_ref, qw(oh be a good boy);
 
     sub fail_auto_message {
+        use Smart::Comments;
         return FAIL;
     }
 }
@@ -28,10 +29,11 @@ use Test::More qw( no_plan );
 sub eval_nok(&$$) {
     my ($block, $exception_pat, $message) = @_;
     my (undef, $file, $line) = caller;
+    use Smart::Comments;
     eval { $block->() };
     my $exception = $@;
     ok $exception => $message;
-    like $exception, qr/\Q$exception_pat\E at $file line $line/ => "Right message";
+    like $exception, qr/\Q$exception_pat\E at \Q$file\E line $line/ => "Right message";
 }
 
 

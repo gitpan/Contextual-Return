@@ -1,6 +1,9 @@
 use Contextual::Return;
 use Test::More 'no_plan';
 
+ok(Contextual::Return::Value->isa('UNIVERSAL')  =>  'Handles class isa ok');
+ok(Contextual::Return::Value->can('can')        =>  'Handles class can ok');
+
 sub foo_no_obj {
     return
         VALUE { bless {}, 'Bar' }

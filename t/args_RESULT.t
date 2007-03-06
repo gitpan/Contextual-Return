@@ -2,15 +2,15 @@ use Contextual::Return;
 
 sub foo {
     return
-        VOID      { $_[1] = 99 }
-        BOOL      { @_ > 0 }
-        LIST      { (@_) x 2 }
-        NUM       { scalar @_ }
-        STR       { join '|', @_ }
-        SCALAR    { $_[0] }
-        SCALARREF { my $var = $_[0]; \$var }
-        HASHREF   { { args => \@_} }
-        ARRAYREF  { \@_ }
+        VOID      { RESULT { $_[1] = 99 }; undef }
+        BOOL      { RESULT { @_ > 0 }; undef }
+        LIST      { RESULT { (@_) x 2 }; undef }
+        NUM       { RESULT { scalar @_ }; undef }
+        STR       { RESULT { join '|', @_ }; undef }
+        SCALAR    { RESULT { $_[0] }; undef }
+        SCALARREF { RESULT { my $var = $_[0]; \$var }; undef }
+        HASHREF   { RESULT { { args => \@_} }; undef }
+        ARRAYREF  { RESULT { \@_ }; undef }
     ;
 }
 

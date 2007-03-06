@@ -5,7 +5,7 @@ use Carp;
 sub foo {
     return
         NONVOID { 4.2, 9.9 }
-        VOID    { croak 'Useless use of foo() in void context' }
+        VOID    { die 'Useless use of foo() in void context' }
     ;
 }
 
@@ -20,7 +20,10 @@ is "$foo", 9.9                     => 'STRING context';
 
 is join(q{,}, foo()), '4.2,9.9'    => 'LIST context';
 
-ok !eval{ ;foo(); 1; }             => 'VOID context fails';
+my $res = eval{ ;foo(); 1; };
+my $exception = $@;
 
-like $@, qr/\QUseless use of foo() in void context/
+ok !$res                           => 'VOID context fails';
+
+like $exception, qr/\QUseless use of foo() in void context/
                                    => 'Error msg correct';

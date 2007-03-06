@@ -1,14 +1,14 @@
 use Contextual::Return;
 use Test::More 'no_plan';
-use Carp;
+use Carp qw< croak cluck  confess >;
 
 sub foo {
     return
-        BOOL      { carp 'oops! Bool'; 1              }
-        NUM       { carp 'oops! Num'; return 7;       }
-        ARRAYREF  { carp 'oops! Array'; return [1,2]; }
+        BOOL      { cluck 'oops! Bool'; 1              }
+        NUM       { cluck 'oops! Num'; return 7;       }
+        ARRAYREF  { cluck 'oops! Array'; return [1,2]; }
         HASHREF   { {name=>'foo', value=>42 }         }
-        VOID      { croak 'Enter not the Abyss!';     }
+        VOID      { confess 'Enter not the Abyss!';     }
     ;
 }
 

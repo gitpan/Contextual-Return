@@ -1,17 +1,73 @@
 package Contextual::Return;
 
-use version; $VERSION = qv('0.1.0');
+# Fake out CORE::GLOBAL::caller and Carp very early...
+BEGIN {
+    no warnings 'redefine';
+
+    *CORE::GLOBAL::caller = sub {
+        my ($uplevels) = shift || 0;
+        return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
+            if $Contextual::Return::uplevel;
+        return CORE::caller($uplevels + 1);
+    };
+
+    use Carp;
+    my $real_carp  = *Carp::carp{CODE};
+    my $real_croak = *Carp::croak{CODE};
+
+    *Carp::carp = sub {
+        goto &{$real_carp} if !$Contextual::Return::uplevel;
+        warn _in_context(@_);
+    };
+
+    *Carp::croak = sub {
+        goto &{$real_croak} if !$Contextual::Return::uplevel;
+        die _in_context(@_);
+    };
+
+}
+
+use version; $VERSION = qv('0.2.0');
 
 use warnings;
 use strict;
-use Carp;
 
-# Hide this module from Carp...
-BEGIN {
-    $Carp::Internal{'Contextual::Return::Value'}++;
+sub _in_context {
+    my $msg = join q{}, @_;
 
-    $Carp::Internal{'Contextual::Return'}++;
-    $Carp::CarpInternal{'Contextual::Return'}++;
+    # Start looking in caller...
+    my $stack_frame = 1;
+    my ($package, $file, $line, $sub) = CORE::caller($stack_frame++);
+
+    my ($orig_package, $prev_package) = ($package) x 2;
+    my $LOC = qq{at $file line $line}; 
+
+    # Walk up stack...
+    STACK_FRAME:
+    while (1) {
+        my ($package, $file, $line, $sub) = CORE::caller($stack_frame++);
+
+        # Fall off the top of the stack...
+        last if !defined $package;
+
+        # Ignore this module (and any helpers)...
+        next STACK_FRAME if $package =~ m{^Contextual::Return}xms;
+
+        # Track the call up the stack...
+        $LOC = qq{at $file line $line}; 
+
+        # Ignore transitions within original caller...
+        next STACK_FRAME
+            if $package eq $orig_package && $prev_package eq $orig_package;
+
+        # If we get a transition out of the original package, we're there...
+        last STACK_FRAME;
+    }
+
+    # Insert location details...
+    $msg =~ s/<LOC>/$LOC/g or $msg =~ s/[^\S\n]*$/ $LOC/;
+    $msg =~ s/$/\n/;
+    return $msg;
 }
 
 # Indentation corresponds to inherited fall-back relationships...
@@ -36,10 +92,16 @@ my @CONTEXTS = qw(
 
 my %attrs_of;
 
+my @OTHER_EXPORTS = qw(
+    LAZY    FIXED   ACTIVE
+    RVALUE  LVALUE  NVALUE
+    RESULT  RECOVER
+);
+
 sub import {
-    my $caller = caller;
+    my $caller = CORE::caller;
     no strict qw( refs );
-    for my $subname (@CONTEXTS, qw(LAZY FIXED RVALUE LVALUE NVALUE )) {
+    for my $subname (@CONTEXTS, @OTHER_EXPORTS) {
         *{$caller.'::'.$subname} = \&{$subname};
     }
     if (require Contextual::Return::Failure) {
@@ -49,6 +111,27 @@ sub import {
 }
 
 use Scalar::Util qw( refaddr );
+
+# Override return value in a C::R handler...
+sub RESULT(&) {
+    my ($block) = @_;
+
+    # Determine call context and arg list...
+    my $context;
+    my $args = do { package DB; $context=(CORE::caller 1)[5]; \@DB::args };
+
+    # Hide from caller() and the enclosing eval{}...
+    
+    # Evaluate block in context and cache result...
+    local $Contextual::Return::uplevel = $Contextual::Return::uplevel+1;
+    $Contextual::Return::__RESULT__
+        =         $context  ?  [[        $block->(@{$args})   ]]
+        : defined $context  ?   [ scalar $block->(@{$args})   ]
+        :                         do {   $block->(@{$args}); [] }
+        ;
+
+    return;
+}
 
 sub RVALUE(&;@) :lvalue;
 sub LVALUE(&;@) :lvalue;
@@ -60,19 +143,20 @@ my %opposite_of = (
     'NVALUE' => 'LVALUE or RVALUE',
 );
 
+
 BEGIN {
     for my $subname (qw( RVALUE LVALUE NVALUE) ) {
         no strict 'refs';
         *{$subname} = sub(&;@) :lvalue {  # (handler, return_lvalue);
             my $handler = shift;
             my $impl;
-            my $args = do{ package DB; ()=caller(1); [@DB::args] };
-            if (!@_) {
+            my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
+            if (@_==0) {
                 $impl = tie $_[0], 'Contextual::Return::Lvalue',
                     $subname => $handler, args=>$args;
             }
             elsif (@_==1 and $impl = tied $_[0]) {
-                croak "Can't install two $subname handlers"
+                die _in_context "Can't install two $subname handlers"
                     if exists $impl->{$subname};
                 $impl->{$subname} = $handler;
             }
@@ -81,13 +165,17 @@ BEGIN {
                                            : defined $_ ? $_
                                            :             'undef'
                                            } @_;
-                die "Expected a $opposite_of{$subname} block ",
-                    "after the $subname block", Carp::shortmess,
-                    "but found instead: $vals\n";
+                die _in_context "Expected a $opposite_of{$subname} block ",
+                                "after the $subname block <LOC> ",
+                                "but found instead: $vals\n";
             }
 
             # Handle void context calls...
             if (!defined wantarray && $impl->{NVALUE}) {
+                # Fake out caller() and Carp...
+                local $Contextual::Return::uplevel = 1;
+
+                # Call and clear handler...
                 $impl->{NVALUE}( @{$impl->{args}} );
                 delete $impl->{NVALUE};
             }
@@ -102,17 +190,23 @@ sub FIXED ($) {
     return $crv;
 }
 
+sub ACTIVE ($) {
+    my ($crv) = @_;
+    $attrs_of{refaddr $crv}{ACTIVE} = 1;
+    return $crv;
+}
+
 sub LIST (;&$) {
     my ($block, $crv) = @_;
 
     # Handle simple context tests...
-    return !!(caller 1)[5] if !@_;
+    return !!(CORE::caller 1)[5] if !@_;
 
     # Ensure we have an object...
     my $attrs;
     if (!refaddr $crv) {
-        my $args = do{ package DB; ()=caller(1); [@DB::args] };
-        my $subname = (caller(1))[3];
+        my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
+        my $subname = (CORE::caller(1))[3];
         $crv = bless \my $scalar, 'Contextual::Return::Value';
         $attrs = $attrs_of{refaddr $crv} = { args => $args, sub => $subname };
     }
@@ -121,18 +215,46 @@ sub LIST (;&$) {
     }
 
     # Handle repetitions...
-    croak "Can't install two LIST handlers"
+    die _in_context "Can't install two LIST handlers"
         if exists $attrs->{LIST};
 
     # Identify context...
     my $wantarray = wantarray;
 
+    # Prepare for exception handling...
+    my $recover = $attrs->{RECOVER};
+    local $Contextual::Return::uplevel = 2;
+
     # Handle list context directly...
-    return $block->(@{$attrs->{args}}) if $wantarray;
+    if (wantarray) {
+        local $Contextual::Return::__RESULT__;
+
+        my @rv = eval { $block->(@{$attrs->{args}}) };
+        if ($recover) {
+            () = $recover->(@{$attrs->{args}});
+        }
+        elsif ($@) {
+            die $@;
+        }
+
+        return @rv if !$Contextual::Return::__RESULT__;
+        return @{$Contextual::Return::__RESULT__->[0]};
+    }
 
     # Handle void context directly...
     if (!defined $wantarray) {
-        $attrs->{VOID}->(@{$attrs->{args}}) if $attrs->{VOID};
+        for my $context (qw< VOID DEFAULT >) {
+            my $handler = $attrs->{$context} or next;
+
+            eval { $attrs->{$context}->(@{$attrs->{args}}) };
+            if ($recover) {
+                $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+            last;
+        }
         return;
     }
 
@@ -142,17 +264,17 @@ sub LIST (;&$) {
 }
 
 
-sub VOID (;&@) {
+sub VOID (;&$) {
     my ($block, $crv) = @_;
 
     # Handle simple context tests...
-    return !defined( (caller 1)[5] ) if !@_;
+    return !defined( (CORE::caller 1)[5] ) if !@_;
 
     # Ensure we have an object...
     my $attrs;
     if (!refaddr $crv) {
-        my $args = do{ package DB; ()=caller(1); [@DB::args] };
-        my $subname = (caller(1))[3];
+        my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
+        my $subname = (CORE::caller(1))[3];
         $crv = bless \my $scalar, 'Contextual::Return::Value';
         $attrs = $attrs_of{refaddr $crv} = { args => $args, sub => $subname };
     }
@@ -161,34 +283,69 @@ sub VOID (;&@) {
     }
 
     # Handle repetitions...
-    croak "Can't install two VOID handlers"
+    die _in_context "Can't install two VOID handlers"
         if exists $attrs->{VOID};
 
     # Identify context...
     my $wantarray = wantarray;
 
+    # Prepare for exception handling...
+    my $recover = $attrs->{RECOVER};
+    local $Contextual::Return::uplevel = 2;
+
     # Handle list context directly, if possible...
     if (wantarray) {
+        local $Contextual::Return::__RESULT__;
         # List or ancestral handlers...
-        for my $context_handler (qw(LIST VALUE NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            return $handler->(@{$attrs->{args}});
+        for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            my @rv = eval { $handler->(@{$attrs->{args}}) };
+            if ($recover) {
+                () = $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            return @rv if !$Contextual::Return::__RESULT__;
+            return @{$Contextual::Return::__RESULT__->[0]};
         }
         # Convert to list from arrayref handler...
         if (my $handler = $attrs->{ARRAYREF}) {
-            my $array_ref = $handler->(@{$attrs->{args}});
+            my $array_ref = eval { $handler->(@{$attrs->{args}}) };
+
+            if ($recover) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            # Array ref may be returned directly, or via RESULT{}...
+            $array_ref = $Contextual::Return::__RESULT__->[0]
+                if $Contextual::Return::__RESULT__;
+
             return @{$array_ref} if (ref $array_ref||q{}) eq 'ARRAY';
         }
         # Return scalar object as one-elem list, if possible...
-        for my $context_handler (qw(STR NUM SCALAR LAZY)) {
-            return $crv if exists $attrs->{$context_handler};
+        for my $context (qw(STR NUM SCALAR LAZY)) {
+            return $crv if exists $attrs->{$context};
         }
-        croak "Can't call $attrs->{sub} in list context";
+        die _in_context "Can't call $attrs->{sub} in list context";
     }
 
     # Handle void context directly...
     if (!defined $wantarray) {
-        $block->(@{$attrs->{args}});
+        eval { $block->(@{$attrs->{args}}) };
+
+        if ($recover) {
+            $recover->(@{$attrs->{args}});
+        }
+        elsif ($@) {
+            die $@;
+        }
+
         return;
     }
 
@@ -204,7 +361,7 @@ for my $context (qw( SCALAR NONVOID )) {
 
         # Handle simple context tests...
         if (!@_) {
-            my $callers_context = (caller 1)[5];
+            my $callers_context = (CORE::caller 1)[5];
             return defined $callers_context
                 && ($context eq 'NONVOID' || !$callers_context);
         }
@@ -212,8 +369,8 @@ for my $context (qw( SCALAR NONVOID )) {
         # Ensure we have an object...
         my $attrs;
         if (!refaddr $crv) {
-            my $args = do{ package DB; ()=caller(1); [@DB::args] };
-            my $subname = (caller(1))[3];
+            my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
+            my $subname = (CORE::caller(1))[3];
             $crv = bless \my $scalar, 'Contextual::Return::Value';
             $attrs = $attrs_of{refaddr $crv}
                     = { args => $args, sub => $subname };
@@ -223,35 +380,75 @@ for my $context (qw( SCALAR NONVOID )) {
         }
 
         # Make sure this block is a possibility too...
-        croak "Can't install two $context handlers"
+        die _in_context "Can't install two $context handlers"
             if exists $attrs->{$context};
         $attrs->{$context} = $block;
 
         # Identify context...
         my $wantarray = wantarray;
 
+        # Prepare for exception handling...
+        my $recover = $attrs->{RECOVER};
+        local $Contextual::Return::uplevel = 2;
+
         # Handle list context directly, if possible...
         if (wantarray) {
+            local $Contextual::Return::__RESULT__;
+
             # List or ancestral handlers...
-            for my $context_handler (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context_handler} or next;
-                return $handler->(@{$attrs->{args}});
+            for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
+                my $handler = $attrs->{$context} or next;
+
+                my @rv = eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    () = $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                return @rv if !$Contextual::Return::__RESULT__;
+                return @{$Contextual::Return::__RESULT__->[0]};
             }
             # Convert to list from arrayref handler...
             if (my $handler = $attrs->{ARRAYREF}) {
-                my $array_ref = $handler->(@{$attrs->{args}});
+
+                my $array_ref = eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    scalar $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                # Array ref may be returned directly, or via RESULT{}...
+                $array_ref = $Contextual::Return::__RESULT__->[0]
+                    if $Contextual::Return::__RESULT__;
+
                 return @{$array_ref} if (ref $array_ref||q{}) eq 'ARRAY';
             }
             # Return scalar object as one-elem list, if possible...
-            for my $context_handler (qw(STR NUM SCALAR LAZY)) {
-                return $crv if exists $attrs->{$context_handler};
+            for my $context (qw(STR NUM SCALAR LAZY)) {
+                return $crv if exists $attrs->{$context};
             }
-            croak "Can't call $attrs->{sub} in list context";
+            die _in_context "Can't call $attrs->{sub} in list context";
         }
 
         # Handle void context directly...
         if (!defined $wantarray) {
-            $attrs->{VOID}->(@{$attrs->{args}}) if $attrs->{VOID};
+            for my $context (qw< VOID DEFAULT >) {
+                my $handler = $attrs->{$context} or next;
+
+                eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                last;
+            }
             return;
         }
 
@@ -260,7 +457,7 @@ for my $context (qw( SCALAR NONVOID )) {
     }
 }
 
-for my $context (@CONTEXTS) {
+for my $context (@CONTEXTS, qw< RECOVER >) {
     next if $context eq 'LIST'     # These
          || $context eq 'VOID'     #  three
          || $context eq 'SCALAR'   #   handled
@@ -273,8 +470,8 @@ for my $context (@CONTEXTS) {
         # Ensure we have an object...
         my $attrs;
         if (!refaddr $crv) {
-            my $args = do{ package DB; ()=caller(1); [@DB::args] };
-            my $subname = (caller(1))[3];
+            my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
+            my $subname = (CORE::caller(1))[3];
             $crv = bless \my $scalar, 'Contextual::Return::Value';
             $attrs = $attrs_of{refaddr $crv}
                    = { args => $args, sub => $subname };
@@ -284,36 +481,76 @@ for my $context (@CONTEXTS) {
         }
 
         # Make sure this block is a possibility too...
-        croak "Can't install two $context handlers"
+        die _in_context "Can't install two $context handlers"
             if exists $attrs->{$context};
         $attrs->{$context} = $block;
 
         # Identify context...
         my $wantarray = wantarray;
 
+        # Prepare for exception handling...
+        my $recover = $attrs->{RECOVER};
+        local $Contextual::Return::uplevel = 2;
+
         # Handle list context directly, if possible...
         if (wantarray) {
+            local $Contextual::Return::__RESULT__;
+
             # List or ancestral handlers...
-            for my $context_handler (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context_handler} or next;
-                return $handler->(@{$attrs->{args}});
+            for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
+                my $handler = $attrs->{$context} or next;
+
+                my @rv = eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    () = $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                return @rv if !$Contextual::Return::__RESULT__;
+                return @{$Contextual::Return::__RESULT__->[0]};
             }
             # Convert to list from arrayref handler...
             if (my $handler = $attrs->{ARRAYREF}) {
-                my $array_ref = $handler->(@{$attrs->{args}});
+                local $Contextual::Return::uplevel = 2;
+
+                # Array ref may be returned directly, or via RESULT{}...
+                my $array_ref = eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    scalar $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                $array_ref = $Contextual::Return::__RESULT__->[0]
+                    if $Contextual::Return::__RESULT__;
+
                 return @{$array_ref} if (ref $array_ref||q{}) eq 'ARRAY';
             }
             # Return scalar object as one-elem list, if possible...
-            for my $context_handler (qw(STR NUM SCALAR LAZY)) {
-                return $crv if exists $attrs->{$context_handler};
+            for my $context (qw(STR NUM SCALAR LAZY)) {
+                return $crv if exists $attrs->{$context};
             }
-            croak "Can't call $attrs->{sub} in list context";
+            die _in_context "Can't call $attrs->{sub} in list context";
         }
 
         # Handle void context directly...
         if (!defined $wantarray) {
             for my $context (qw(VOID DEFAULT)) {
-                $attrs->{$context}->(@{$attrs->{args}}) if $attrs->{$context};
+                next if !$attrs->{$context};
+
+                eval { $attrs->{$context}->(@{$attrs->{args}}) };
+
+                if ($recover) {
+                    $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                last;
             }
             return;
         }
@@ -327,59 +564,136 @@ for my $context (@CONTEXTS) {
 *LAZY = *SCALAR;
 
 package Contextual::Return::Value;
-use Carp;
+BEGIN { *_in_context = *Contextual::Return::_in_context; }
 use Scalar::Util qw( refaddr );
 
 use overload (
     q{""} => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(STR SCALAR LAZY VALUE NONVOID DEFAULT NUM)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(STR SCALAR LAZY VALUE NONVOID DEFAULT NUM)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "Can't call $attrs->{sub} in string context";
+        die _in_context "Can't call $attrs->{sub} in string context";
     },
 
     q{0+} => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(NUM SCALAR LAZY VALUE NONVOID DEFAULT STR)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(NUM SCALAR LAZY VALUE NONVOID DEFAULT STR)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "Can't call $attrs->{sub} in numeric context";
+        die _in_context "Can't call $attrs->{sub} in numeric context";
     },
 
     q{bool} => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(BOOL SCALAR LAZY VALUE NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(BOOL SCALAR LAZY VALUE NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "Can't call $attrs->{sub} in boolean context";
+        die _in_context "Can't call $attrs->{sub} in boolean context";
     },
     '${}' => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(SCALARREF REF NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(SCALARREF REF NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
+            # Catch bad behaviour...
+            die _in_context "$context block did not return ",
+                            "a suitable reference to the scalar dereference"
+                    if ref($rv) ne 'SCALAR' && ref($rv) ne 'OBJ';
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
+            }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
             }
             return $rv;
         }
@@ -391,20 +705,59 @@ use overload (
     '@{}' => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(ARRAYREF REF)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = scalar $handler->(@{$attrs->{args}});
+        local $Contextual::Return::__RESULT__;
+        for my $context (qw(ARRAYREF REF)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
+            # Catch bad behaviour...
+            die _in_context "$context block did not return ",
+                            "a suitable reference to the array dereference"
+                    if ref($rv) ne 'ARRAY' && ref($rv) ne 'OBJ';
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        # for my $context_handler (qw(LIST VALUE NONVOID DEFAULT STR NUM SCALAR LAZY)) {
-        for my $context_handler (qw(LIST VALUE NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my @rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::uplevel = 2;
+            my @rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                () = $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                @rv = @{$Contextual::Return::__RESULT__->[0]};
+            }
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = \@rv;
+            }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { @rv };
             }
             return \@rv;
         }
@@ -413,41 +766,110 @@ use overload (
     '%{}' => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(HASHREF REF NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(HASHREF REF NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
+            # Catch bad behaviour...
+            die _in_context "$context block did not return ",
+                            "a suitable reference to the hash dereference"
+                    if ref($rv) ne 'HASH' && ref($rv) ne 'OBJ';
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "$attrs->{sub} can't return a hash reference";
+        die _in_context "$attrs->{sub} can't return a hash reference";
     },
     '&{}' => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(CODEREF REF NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = $handler->(@{$attrs->{args}});
+        for my $context (qw(CODEREF REF NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
+            # Catch bad behaviour...
+            die _in_context "$context block did not return ",
+                            "a suitable reference to the subroutine dereference"
+                    if ref($rv) ne 'CODE' && ref($rv) ne 'OBJ';
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "$attrs->{sub} can't return a subroutine reference";
+        die _in_context "$attrs->{sub} can't return a subroutine reference";
     },
     '*{}' => sub {
         my ($self) = @_;
         my $attrs = $attrs_of{refaddr $self};
-        for my $context_handler (qw(GLOBREF REF NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context_handler} or next;
-            my $rv = scalar $handler->(@{$attrs->{args}});
+        for my $context (qw(GLOBREF REF NONVOID DEFAULT)) {
+            my $handler = $attrs->{$context} or next;
+
+            local $Contextual::Return::__RESULT__;
+            local $Contextual::Return::uplevel = 2;
+            my $rv = eval { $handler->(@{$attrs->{args}}) };
+
+            if (my $recover = $attrs->{RECOVER}) {
+                scalar $recover->(@{$attrs->{args}});
+            }
+            elsif ($@) {
+                die $@;
+            }
+
+            if ($Contextual::Return::__RESULT__) {
+                $rv = $Contextual::Return::__RESULT__->[0];
+            }
+
+            # Catch bad behaviour...
+            die _in_context "$context block did not return ",
+                            "a suitable reference to the typeglob dereference"
+                    if ref($rv) ne 'GLOB' && ref($rv) ne 'OBJ';
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = $rv;
             }
+            elsif ( !$attrs->{ACTIVE} ) {
+                $attrs->{$context} = sub { $rv };
+            }
             return $rv;
         }
-        croak "$attrs->{sub} can't return a typeglob reference";
+        die _in_context "$attrs->{sub} can't return a typeglob reference";
     },
 
     fallback => 1,
@@ -461,36 +883,77 @@ sub DESTROY {
 my $NO_SUCH_METHOD = qr/\ACan't (?:locate|call)(?: class| object)? method/ms;
 
 # Forward metainformation requests to actual class...
-sub can { our $AUTOLOAD = 'can'; goto &AUTOLOAD; }
-sub isa { our $AUTOLOAD = 'isa'; goto &AUTOLOAD; }
+sub can {
+    my ($invocant) = @_;
+    # Only forward requests on actual C::R::V objects...
+    if (ref $invocant) {
+        our $AUTOLOAD = 'can';
+        goto &AUTOLOAD;
+    }
+
+    # Refer requests on classes to actual class hierarchy...
+    return $invocant->SUPER::can(@_[1..$#_]);
+}
+
+sub isa {
+    # Only forward requests on actual C::R::V objects...
+    my ($invocant) = @_;
+    if (ref $invocant) {
+        our $AUTOLOAD = 'isa';
+        goto &AUTOLOAD;
+    }
+
+    # Refer requests on classes to actual class hierarchy...
+    return $invocant->SUPER::isa(@_[1..$#_]);
+}
+
 
 sub AUTOLOAD {
     my ($self) = @_;
-    my $attrs = $attrs_of{refaddr $self};
     our $AUTOLOAD;
     $AUTOLOAD =~ s/.*:://xms;
-    for my $context_handler (qw(OBJREF STR SCALAR LAZY VALUE NONVOID DEFAULT)) {
-        my $handler = $attrs->{$context_handler} or next;
-        my $object  = scalar $handler->(@{$attrs->{args}});
+
+    my $attrs = $attrs_of{refaddr $self} || {};
+    for my $context (qw(OBJREF STR SCALAR LAZY VALUE NONVOID DEFAULT)) {
+        my $handler = $attrs->{$context} or next;
+
+        local $Contextual::Return::__RESULT__;
+        local $Contextual::Return::uplevel = 2;
+        my $object = eval { $handler->(@{$attrs->{args}}) };
+
+        if (my $recover = $attrs->{RECOVER}) {
+            scalar $recover->(@{$attrs->{args}});
+        }
+        elsif ($@) {
+            die $@;
+        }
+
+        if ($Contextual::Return::__RESULT__) {
+            $object = $Contextual::Return::__RESULT__->[0];
+        }
+
         if ( $attrs->{FIXED} ) {
             $_[0] = $object;
+        }
+        elsif ( !$attrs->{ACTIVE} ) {
+            $attrs->{$context} = sub { $object };
         }
         shift;
         if (wantarray) {
             my @result = eval { $object->$AUTOLOAD(@_) };
             my $exception = $@;
             return @result if !$exception;
-            die $exception if $exception !~ $NO_SUCH_METHOD;
+            die _in_context $exception if $exception !~ $NO_SUCH_METHOD;
         }
         else {
             my $result = eval { $object->$AUTOLOAD(@_) };
             my $exception = $@;
             return $result if !$exception;
-            die $exception if $exception !~ $NO_SUCH_METHOD;
+            die _in_context $exception if $exception !~ $NO_SUCH_METHOD;
         }
-        croak "Can't call method '$AUTOLOAD' on $context_handler value returned by $attrs->{sub}";
+        die _in_context "Can't call method '$AUTOLOAD' on $context value returned by $attrs->{sub}";
     }
-    croak "Can't call method '$AUTOLOAD' on value returned by $attrs->{sub}";
+    die _in_context "Can't call method '$AUTOLOAD' on value returned by $attrs->{sub}";
 }
 
 package Contextual::Return::Lvalue;
@@ -503,12 +966,25 @@ sub TIESCALAR {
 # Handle calls that are lvalues...
 sub STORE {
     local *CALLER::_ = \$_;
-    return $_[0]{LVALUE}( @{$_[0]{args}} ) for $_[1];
+    local *_         = \$_[1];
+    local $Contextual::Return::uplevel = 1;
+    local $Contextual::Return::__RESULT__;
+
+    my $rv = $_[0]{LVALUE}( @{$_[0]{args}} );
+
+    return $rv if !$Contextual::Return::__RESULT__;
+    return $Contextual::Return::__RESULT__->[0];
 }
 
 # Handle calls that are rvalues...
 sub FETCH {
-    return $_[0]{RVALUE} ? $_[0]{RVALUE}( @{$_[0]{args}} ) : undef;
+    local $Contextual::Return::uplevel = 1;
+    local $Contextual::Return::__RESULT__;
+
+    my $rv = $_[0]{RVALUE} ? $_[0]{RVALUE}( @{$_[0]{args}} ) : undef;
+
+    return $rv if !$Contextual::Return::__RESULT__;
+    return $Contextual::Return::__RESULT__->[0];
 }
 
 sub DESTROY {};
@@ -524,7 +1000,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.1.0
+This document describes Contextual::Return version 0.2.0
 
 
 =head1 SYNOPSIS
@@ -614,8 +1090,8 @@ corresponding context:
 =head2 Contextual returns
 
 Those three subroutines can also be used in another way: as labels on a
-series of I<contextual return blocks> (collectively known as a I<context
-sequence>). When a context sequence is returned, it automatically
+series of I<contextual return blocks> (collectively known as a I<contextual
+return sequence>). When a context sequence is returned, it automatically
 selects the appropriate contextual return block for the calling context.
 So the previous example could be written even more cleanly as:
 
@@ -644,9 +1120,10 @@ context.
 =head2 Lazy contextual return values
 
 C<LIST> and C<VOID> blocks are always executed during the C<return>
-statement. However, C<SCALAR> blocks are not. Instead, in scalar
-contexts, returning a C<SCALAR> block causes the subroutine to return an
-object that lazily evaluates that block every time a value is required.
+statement. However, scalar return blocks (C<SCALAR>, C<STR>, C<NUM>,
+C<BOOL>, etc.) blocks are not. Instead, returning any of scalar block
+types causes the subroutine to return an object that lazily
+evaluates that block only when the return value is used.
 
 This means that returning a C<SCALAR> block is a convenient way to
 implement a subroutine with a lazy return value. For example:
@@ -662,22 +1139,7 @@ implement a subroutine with a lazy return value. For example:
 
     print $digest;   # md5() called only when $digest used as string
 
-That also means that the value returned via a C<SCALAR> block can be
-"active"; that is, re-evaluated every time it is used:
-
-    sub make_counter {
-        my $counter = 0;
-        return SCALAR { $counter++ }
-    }
-
-    my $idx = make_counter();
-
-    print "$idx\n";    # 0
-    print "$idx\n";    # 1
-    print "$idx\n";    # 2
-
-To make this technique more self documenting, the C<SCALAR> block has an
-alias: C<LAZY>:
+To better document this usage, the C<SCALAR> block has a synonym: C<LAZY>.
 
     sub digest {
         return LAZY {
@@ -686,14 +1148,39 @@ alias: C<LAZY>:
         }
     }
 
+
+=head2 Active contextual return values
+
+Once a return value has been lazily evaluated in a given context, 
+the resulting value is cached, and thereafter reused in that same context.
+
+However, you can specify that, rather than being cached, the value
+should be re-evaluated I<every> time the value is used:
+
+   sub make_counter {
+        my $counter = 0;
+        return ACTIVE
+            SCALAR   { ++$counter }
+            ARRAYREF { [1..$counter] }
+    }   
+            
+    my $idx = make_counter();
+        
+    print "$idx\n";      # 1
+    print "$idx\n";      # 2
+    print "[@$idx]\n";   # [1 2]
+    print "$idx\n";      # 3
+    print "[@$idx]\n";   # [1 2 3]
+
  
 =head2 Semi-lazy contextual return values
 
-Sometimes, full repeated lazy evaluation of a scalar return value isn't
-what you really want. Sometimes what you really want is for the return
-value to be lazily evaluated once (the first time it's used), and then
-for that first value to be reused whenever the return value is
-subsequently reevaluated.
+Sometimes, single or repeated lazy evaluation of a scalar return value
+in different contexts isn't what you really want. Sometimes what you
+really want is for the return value to be lazily evaluated once only (the
+first time it's used in any context), and then for that first value to
+be reused whenever the return value is subsequently reevaluated in any
+other context.
 
 To get that behaviour, you can use the C<FIXED> modifier, which causes
 the return value to morph itself into the actual value the first time it
@@ -763,11 +1250,11 @@ it's used. For example:
 =head2 Referential contexts
 
 The other major kind of scalar return value is a reference.
-Contextual::Return provides context blocks that allow you to specify
-what to (lazily) return when the return value of a subroutine is used as
-a reference to a scalar (C<SCALARREF {...}>), to an array (C<ARRAYREF
-{...}>), to a hash (C<HASHREF {...}>), to a subroutine (C<CODEREF {...}>), or
-to a typeglob (C<GLOBREF {...}>).
+Contextual::Return provides contextual return blocks that allow you to
+specify what to (lazily) return when the return value of a subroutine is
+used as a reference to a scalar (C<SCALARREF {...}>), to an array
+(C<ARRAYREF {...}>), to a hash (C<HASHREF {...}>), to a subroutine
+(C<CODEREF {...}>), or to a typeglob (C<GLOBREF {...}>).
 
 For example, the server status subroutine shown earlier could be extended to
 allow it to return a hash reference, thereby supporting "named return values":
@@ -845,7 +1332,7 @@ returns a reference to whatever would have been returned in scalar context.
 Likewise, if no C<ARRAYREF {...}> block is specified, the module supplies one
 that returns the list-context return value wrapped up in an array reference.
 
-So, in fact, you could just write:
+So you could just write:
 
     sub get_todo_tasks {
         return (
@@ -976,7 +1463,7 @@ followed until a more generic one is found. The dotted arrows again
 represent the interconversion of return values, which is
 attempted only after the normal hierarchical fallback fails.
 
-In other words, if a subroutine is called in a context that expects a
+For example, if a subroutine is called in a context that expects a
 scalar reference, but no C<SCALARREF {...}> block is provided, then
 Contextual::Return tries the following blocks in order:
 
@@ -998,6 +1485,7 @@ module tries:
          STR {...} (treating it as a list of one element)
          NUM {...} (treating it as a list of one element)
       SCALAR {...} (treating it as a list of one element)
+       VALUE {...} (treating it as a list of one element)
 
 The more generic context blocks are especially useful for intercepting
 unexpected and undesirable call contexts. For example, to turn I<off>
@@ -1107,7 +1595,7 @@ alternatives, like so:
                             LIST    { ()       }
                             DEFAULT { croak @_ }
                         },
-        } @args;
+        }, @args;
     }
 
 This configures Contextual::Return so that, instead of the usual
@@ -1163,17 +1651,17 @@ argument (i.e. I<before> the hash) like so:
                             LIST    { ()       }
                             DEFAULT { croak @_ }
                         },
-        } @_;
+        }, @_;
 
 and then load the module:
 
-    use MyModule qw( other args here ), -fatal=>'undefined';
+    use MyModule qw( other args here ), -fail=>'undefined';
 
 or:
 
-    use MyModule qw( other args here ), -fatal=>'exception';
+    use MyModule qw( other args here ), -fail=>'exception';
 
-I this case, C<FAIL_WITH> scans the argument list for a pair of values: it's
+In this case, C<FAIL_WITH> scans the argument list for a pair of values: its
 flag string, followed by some other selector value. Then it looks up the
 selector value in the hash, and installs the corresponding subroutine as its
 local C<FAIL> handler.
@@ -1182,7 +1670,7 @@ If this "flagged" interface is used, the user of the module can also
 specify their own handler directly, by passing a subroutine reference as
 the selector value instead of a string:
 
-    use MyModule qw( other args here ), -fatal=>sub{ die 'horribly'};
+    use MyModule qw( other args here ), -fail=>sub{ die 'horribly'};
 
 If this last example were used, any call to C<FAIL> within MyModule
 would invoke the specified anonymous subroutine (and hence throw a
@@ -1261,8 +1749,8 @@ return value.
 
 This is occasionally annoying, so the Contextual::Return module offers
 a solution: in addition to all the context blocks described above, it
-provides three special context blocks specifically for use in lvalue
-subroutines: C<LVALUE>, C<RVALUE>, and C<NVALUE>.
+provides three special contextual return blocks specifically for use in
+lvalue subroutines: C<LVALUE>, C<RVALUE>, and C<NVALUE>.
 
 Using these blocks you can specify what happens when an lvalue
 subroutine is used in lvalue and non-lvalue (rvalue) context. For
@@ -1342,6 +1830,161 @@ within an C<RVALUE> block:
 That's because, in a void context the return value is never evaluated,
 so it is never treated as an rvalue, which means the C<RVALUE> block
 never executes.
+
+
+=head2 Result blocks
+
+Occasionally, it's convenient to calculate a return value I<before> the
+end of a contextual return block. For example, you may need to clean up
+external resources involved in the calculation after it's complete.
+Typically, this requirement produces a slightly awkward code sequence
+like this:
+
+    return 
+        VALUE {
+            $db->start_work();
+            my $result = $db->retrieve_query($query);
+            $db->commit();
+            $result;
+        }
+
+Such code sequences become considerably more awkward when you want
+the return value to be context sensitive, in which case you have to
+write either:
+
+    return 
+        LIST {
+            $db->start_work();
+            my @result = $db->retrieve_query($query);
+            $db->commit();
+            @result;
+        }
+        SCALAR {
+            $db->start_work();
+            my $result = $db->retrieve_query($query);
+            $db->commit();
+            $result;
+        }
+
+or, worse:
+
+    return 
+        VALUE {
+            $db->start_work();
+            my $result = LIST ? [$db->retrieve_query($query)]
+                              :  $db->retrieve_query($query);
+            $db->commit();
+            LIST ? @{$result} : $result;
+        }
+
+To avoid these infelicities, Contextual::Return provides a second way of
+setting the result of a context block; a way that doesn't require that the
+result be the last statement in the block:
+
+    return 
+        LIST {
+            $db->start_work();
+            RESULT { $db->retrieve_query($query) };
+            $db->commit();
+        }
+        SCALAR {
+            $db->start_work();
+            RESULT { $db->retrieve_query($query) };
+            $db->commit();
+        }
+
+The presence of a C<RESULT> block inside a contextual return block causes
+that block to return the value of the final statement of the C<RESULT>
+block as the handler's return value, rather than returning the value of
+the handler's own final statement. In other words, the presence of a C<RESULT>
+block overrides the normal return value of a context handler.
+
+Better still, the C<RESULT> block always evaluates its final statement
+in the same context as the surrounding C<return>, so you can just write:
+
+    return 
+        VALUE {
+            $db->start_work();
+            RESULT { $db->retrieve_query($query) };
+            $db->commit();
+        }
+
+and the C<retrieve_query()> method will be called in the appropriate context
+in all cases.
+
+A C<RESULT> block can appear anywhere inside any contextual return
+block, but may not be used outside a context block. That is, this
+is an error:
+
+    if ($db->closed) {
+        RESULT { undef };   # Error: not in a context block
+    }
+    return 
+        VALUE {
+            $db->start_work();
+            RESULT { $db->retrieve_query($query) };
+            $db->commit();
+        }
+
+
+=head2 Post-handler clean-up
+
+If a subroutine uses an external resource, it's often necessary to close
+or clean-up that resource after the subroutine ends...regardless of
+whether the subroutine exits normally or via an exception.
+
+Typically, this is done by encapsulating the resource in a lexically
+scoped object whose constructor does the clean-up. However, if the clean-up
+doesn't involve deallocation of an object (as in the C<< $db->commit() >>
+example in the previous section), it can be annoying to have to create a
+class and allocate a container object, merely to mediate the clean-up.
+
+To make it easier to manage such resources, Contextual::Return supplies
+a special labelled block: the C<RECOVER> block. If a C<RECOVER> block is
+specified as part of a contextual return sequence, that block is
+executed after any context handler, even if the context handler exits
+via an exception.
+
+So, for example, you could implement a simple commit-or-revert
+policy like so:
+
+    return 
+        LIST    { $db->retrieve_all($query) }
+        SCALAR  { $db->retrieve_next($query) }
+        RECOVER {
+            if ($@) {
+                $db->revert();
+            }
+            else {
+                $db->commit();
+            }
+        }
+
+The presence of a C<RECOVER> block also intercepts all exceptions thrown
+in any other context block in the same contextual return sequence. Any
+such exception is passed into the C<RECOVER> block in the usual manner:
+via the C<$@> variable. The exception may be rethrown out of the
+C<RECOVER> block by calling C<die>:
+
+    return 
+        LIST    { $db->retrieve_all($query) }
+        DEFAULT { croak "Invalid call (not in list context)" }
+        RECOVER {
+            die $@ if $@;    # Propagate any exception
+            $db->commit();   # Otherwise commit the changes
+        }
+
+A C<RECOVER> block can also access or replace the returned value, by
+invoking a C<RESULT> block. For example:
+
+    return 
+        LIST    { attempt_to_generate_list_for(@_)  }
+        SCALAR  { attempt_to_generate_count_for(@_) }
+        RECOVER {
+            if ($@) {                # On any exception...
+                RESULT { undef }     # ...return undef
+            }
+        }
 
 
 =head1 INTERFACE 
@@ -1580,7 +2223,7 @@ C<$_> value, use C<$CALLER::_>.
 =item C<< RVALUE >>
 
 This block is executed when the result of an C<:lvalue> subroutine is used
-as an rvalue. The final value that is evaluated in the black becomes the
+as an rvalue. The final value that is evaluated in the block becomes the
 rvalue.
 
 =item C<< NVALUE >>
@@ -1589,6 +2232,32 @@ This block is executed when an C<:lvalue> subroutine is evaluated in void
 context.
 
 =back
+
+=head2 Explicit result blocks
+
+=over 
+
+=item C<< RESULT >> 
+
+This block may only appear inside a context handler block. It causes the
+surrounding handler to return the final value of the C<RESULT>'s block,
+rather than the final value of the handler's own block. This override occurs
+regardless of the location to the C<RESULT> block within the handler.
+
+=back
+
+=head2 Recovery blocks
+
+=over 
+
+=item C<< RECOVER >> 
+
+If present in a context return sequence, this block grabs control after
+any context handler returns or exits via an exception. If an exception
+was thrown it is passed to the C<RECOVER> block via the C<$@> variable.
+
+=back
+
 
 =head2 Modifiers
 
@@ -1599,6 +2268,11 @@ context.
 This specifies that the scalar value will only be evaluated once, the
 first time it is used, and that the value will then morph into that
 evaluated value.
+
+=item C<< ACTIVE >>
+
+This specifies that the scalar value's originating block will be re-
+evaluated every time the return value is used.
 
 =back
 

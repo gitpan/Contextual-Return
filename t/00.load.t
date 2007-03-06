@@ -4,4 +4,4 @@ BEGIN {
 use_ok( 'Contextual::Return' );
 }
 
-diag( "Testing Contextual::Return $Contextual::Return::VERSION" );
+diag( "Testing Contextual::Return" );

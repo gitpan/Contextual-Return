@@ -1,13 +1,8 @@
 package Contextual::Return::Failure;
 use version; $VERSION = qv('0.0.2');
-use Carp;
-
-BEGIN {
-    $Carp::Internal{'Contextual::Return::Failure'}++;
-    $Carp::CarpInternal{'Contextual::Return::Failure'}++;
-}
 
 use Contextual::Return;
+BEGIN { *_in_context = *Contextual::Return::_in_context }
 
 use warnings;
 use strict;
@@ -24,10 +19,10 @@ sub _FAIL_WITH {
     }
     else {
         $selector_ref = shift;
-        croak 'Usage: FAIL_WITH $flag_opt, \%selector, @args'
+        die _in_context 'Usage: FAIL_WITH $flag_opt, \%selector, @args'
             if ref $selector_ref ne 'HASH';
     }
-    croak "Selector values must be sub refs"
+    die _in_context "Selector values must be sub refs"
         if grep {ref ne 'CODE'} values %{$selector_ref};
 
     # Search for handler sub;
@@ -54,17 +49,17 @@ sub _FAIL_WITH {
             last SELECTION;
         }
         elsif ($flag) {
-            croak "Invalid option: $flag => $selection";
+            die _in_context "Invalid option: $flag => $selection";
         }
     }
 
     # (Re)set handler...
     if ($handler) {
-        my $caller = join '|', (caller 1)[0,1];
-        if (exists $handler_for{$caller}) {
-            carp "FAIL handler for package ", scalar caller, " redefined";
+        my $caller_loc = join '|', (CORE::caller 1)[0,1];
+        if (exists $handler_for{$caller_loc}) {
+            warn _in_context "FAIL handler for package ", scalar CORE::caller, " redefined";
         }
-        $handler_for{$caller} = $handler;
+        $handler_for{$caller_loc} = $handler;
     }
 };
 
@@ -74,28 +69,27 @@ sub _FAIL (;&) {
     my @args;
     if ($arg_generator_ref) {
         package DB;
-        ()=caller(1);
+        ()=CORE::caller(1);
         @args = $arg_generator_ref->(@DB::args);
     }
 
     # Handle user-defined failure semantics...
-    my $caller = join '|', (caller 1)[0,1];
-    if (exists $handler_for{$caller} ) {
-        return $handler_for{$caller}->(@args);
+    my $caller_loc = join '|', (CORE::caller 1)[0,1];
+    if (exists $handler_for{$caller_loc} ) {
+        # Fake out caller() and Carp...
+        local $Contextual::Return::uplevel = 1;
+
+        return $handler_for{$caller_loc}->(@args);
     }
 
     my $exception = @args == 1 ? $args[0]
                   : @args > 0  ? join(q{}, @args)
-                  :              "Call to " . (caller 1)[3] . "() failed"
+                  :              "Call to " . (CORE::caller 1)[3] . "() failed"
                   ;
-    if (!ref $exception) {
-        # Do any context-reporting transparently...
-        package Carp;
-        my $where = Carp::shortmess("");
-        $where =~ s/\A .* called [ ] at/ at/xms;
 
-        # Join message, if string...
-        $exception .= join q{}, @_, $where;
+    # Join message with croak() semantics, if string...
+    if (!ref $exception) {
+        $exception .= _in_context @_;
     }
 
     # Check for immediate failure...
@@ -110,12 +104,10 @@ sub _FAIL (;&) {
             if (ref $exception) {
                 my $message = "$exception";
                 $message =~ s/$/\n/;
-                package Carp;
-                croak $message, "Failure value used"
+                die _in_context $message, "Failure value used"
             }
             else {
-                package Carp;
-                croak $exception, "Failure value used"
+                die _in_context $exception, "Failure value used"
             }
         }
 }

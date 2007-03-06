@@ -8,7 +8,7 @@ sub eval_nok(&$$) {
     eval { $block->() };
     my $exception = $@;
     ok $exception => $message;
-    like $exception, qr/\Q$exception_pat\E at $file line $line/ => "Right message";
+    like $exception, qr/\Q$exception_pat\E at \Q$file\E line $line/ => "Right message";
 }
 
 

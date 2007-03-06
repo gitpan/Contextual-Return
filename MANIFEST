@@ -23,3 +23,10 @@ t/fixed.t
 t/lazy.t
 t/lvalue.t
 t/scalar-to-list.t
+t/RECOVER.t
+t/RECOVER_RESULT.t
+t/RECOVER_exception.t
+t/RECOVER_exception_RESULT.t
+t/args_RESULT.t
+t/caller.t
+t/simple_RESULT.t
