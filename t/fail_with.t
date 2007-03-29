@@ -17,7 +17,6 @@ sub set_up_1 {
     Contextual::Return::FAIL_WITH $FAIL_SPEC_ref, qw(oh be a good boy);
 
     sub fail_auto_message {
-        use Smart::Comments;
         return FAIL;
     }
 }
@@ -29,7 +28,6 @@ use Test::More qw( no_plan );
 sub eval_nok(&$$) {
     my ($block, $exception_pat, $message) = @_;
     my (undef, $file, $line) = caller;
-    use Smart::Comments;
     eval { $block->() };
     my $exception = $@;
     ok $exception => $message;

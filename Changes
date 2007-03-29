@@ -54,3 +54,8 @@ Revision history for Contextual-Return
     - Rejigged FIXED/LAZY/ACTIVE
 
     - Added RESULT and RECOVER blocks (thanks Aaron)
+
+
+0.2.1  Thu Mar 29 17:59:40 2007
+
+    - Removed spurious Smart::Comments dependency (thanks Dave!)

@@ -27,7 +27,7 @@ BEGIN {
 
 }
 
-use version; $VERSION = qv('0.2.0');
+use version; $VERSION = qv('0.2.1');
 
 use warnings;
 use strict;
@@ -1000,7 +1000,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.2.0
+This document describes Contextual::Return version 0.2.1
 
 
 =head1 SYNOPSIS
