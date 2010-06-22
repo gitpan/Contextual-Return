@@ -1,5 +1,5 @@
 package Contextual::Return::Failure;
-use version; $VERSION = qv('0.0.2');
+#use version; $VERSION = qv('0.0.2');
 
 use Contextual::Return;
 BEGIN { *_in_context = *Contextual::Return::_in_context }
@@ -92,10 +92,10 @@ sub _FAIL (;&) {
         $exception .= _in_context @_;
     }
 
-    # Check for immediate failure...
-    use Want qw( want );
-    return 0 if want 'BOOL';
-    die $exception if !want 'SCALAR';
+#    # Check for immediate failure...
+#    use Want qw( want );
+#    return 0 if want 'BOOL';
+#    die $exception if !want 'SCALAR';
 
     # Return a delayed failure object...
     return
@@ -104,10 +104,10 @@ sub _FAIL (;&) {
             if (ref $exception) {
                 my $message = "$exception";
                 $message =~ s/$/\n/;
-                die _in_context $message, "Failure value used"
+                die _in_context $message, "Attempted to use failure value"
             }
             else {
-                die _in_context $exception, "Failure value used"
+                die _in_context $exception, "Attempted to use failure value"
             }
         }
 }

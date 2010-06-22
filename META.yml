@@ -1,13 +1,16 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         Contextual-Return
-version:      v0.2.1
-version_from: lib/Contextual/Return.pm
-installdirs:  site
-requires:
+--- #YAML:1.0
+name:                Contextual-Return
+version:             0.003001
+abstract:            Create context-senstive return values
+license:             ~
+author:              
+    - Damian Conway <DCONWAY@cpan.org>
+generated_by:        ExtUtils::MakeMaker version 6.42
+distribution_type:   module
+requires:     
     Test::More:                    0
     version:                       0
     Want:                          0
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.17
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3

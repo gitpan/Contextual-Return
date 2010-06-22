@@ -6,6 +6,7 @@ sub bar {
 
 sub foo {
     return
+        PUREBOOL  { 1 }
         BOOL      { 0 }
         LIST      { 1,2,3 }
         NUM       { 42 }
@@ -22,21 +23,24 @@ sub foo {
 package Other;
 use Test::More 'no_plan';
 
-is_deeply [ ::foo() ], [1,2,3]                  => 'LIST context';
+is_deeply [ ::foo() ], [1,2,3]                      => 'LIST context';
 
-is do{ ::foo() ? 'true' : 'false' }, 'false'    => 'BOOLEAN context';
+is do{ ::foo() ? 'true' : 'false' }, 'true'         => 'PURE BOOLEAN context';
 
-is 0+::foo(), 42                                => 'NUMERIC context';
+my $x;
+is do{ ($x = ::foo()) ? 'true' : 'false' }, 'false' => 'BOOLEAN context';
 
-is "".::foo(), 'forty-two'                      => 'STRING context';
+is 0+::foo(), 42                                    => 'NUMERIC context';
 
-is ${::foo}, 7                                  => 'SCALARREF context';
+is "".::foo(), 'forty-two'                          => 'STRING context';
+
+is ${::foo}, 7                                      => 'SCALARREF context';
 
 is_deeply \%{::foo()},
-          { name => 'foo', value => 99}         => 'HASHREF context';
+          { name => 'foo', value => 99}             => 'HASHREF context';
 
-is_deeply \@{::foo()}, [3,2,1]                  => 'ARRAYREF context';
+is_deeply \@{::foo()}, [3,2,1]                      => 'ARRAYREF context';
 
-is \*{::foo()}, \*STDERR                        => 'GLOBREF context';
+is \*{::foo()}, \*STDERR                            => 'GLOBREF context';
 
-is ::foo->(), 'in bar'                          => 'ARRAYREF context';
+is ::foo->(), 'in bar'                              => 'ARRAYREF context';

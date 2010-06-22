@@ -30,3 +30,10 @@ t/RECOVER_exception_RESULT.t
 t/args_RESULT.t
 t/caller.t
 t/simple_RESULT.t
+t/cleanup.t
+t/method.t
+t/retobj.t
+t/simple_export.t
+t/simple_prefix.t
+t/simple_rename.t
+t/try

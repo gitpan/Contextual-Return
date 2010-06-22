@@ -59,3 +59,22 @@ Revision history for Contextual-Return
 0.2.1  Thu Mar 29 17:59:40 2007
 
     - Removed spurious Smart::Comments dependency (thanks Dave!)
+
+
+0.003001  Tue Jun 22 17:20:36 2010
+
+    - Added Contextual::Return::FREEZE and Contextual::Return::DUMP
+      to facilitate debugging
+
+    - General clean-and-tighten of documentation
+
+    - Added CLEANUP blocks
+
+    - Added PUREBOOL context
+
+    - [BACKWARDS INCOMPATIBLE CHANGE] Changed export interface
+
+    - Added warning about (mis)behaviour of LVALUE, RVALUE, NVALUE
+      under the debugger (thanks Steven)
+
+    - Documented METHOD handlers

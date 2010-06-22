@@ -1,4 +1,11 @@
-use Contextual::Return;
+use Contextual::Return
+        qr{},
+        BOOL   => BOOLEAN,
+        LIST   => VECTOR,
+        NUM    => NUMERIC,
+        STR    => STRINGIFIC,
+        SCALAR => SINGULAR,
+;
 
 sub bar {
     return 'in bar';
@@ -6,16 +13,16 @@ sub bar {
 
 sub foo {
     return
-        BOOL      { RESULT { 0 }; undef }
-        LIST      { RESULT { 1,2,3 }; undef }
-        NUM       { RESULT { 42 }; undef }
-        STR       { RESULT { 'forty-two' }; undef }
-        SCALAR    { RESULT { 86 }; undef }
-        SCALARREF { RESULT { \7 }; undef }
-        HASHREF   { RESULT { { name => 'foo', value => 99} }; undef }
-        ARRAYREF  { RESULT { [3,2,1] }; undef }
-        GLOBREF   { RESULT { \*STDERR }; undef }
-        CODEREF   { RESULT { \&bar }; undef }
+        BOOLEAN    { 0 }
+        VECTOR     { 1,2,3 }
+        NUMERIC    { 42 }
+        STRINGIFIC { 'forty-two' }
+        SINGULAR   { 86 }
+        SCALARREF  { \7 }
+        HASHREF    { { name => 'foo', value => 99} }
+        ARRAYREF   { [3,2,1] }
+        GLOBREF    { \*STDERR }
+        CODEREF    { \&bar }
     ;
 }
 
@@ -40,13 +47,3 @@ is_deeply \@{::foo()}, [3,2,1]                  => 'ARRAYREF context';
 is \*{::foo()}, \*STDERR                        => 'GLOBREF context';
 
 is ::foo->(), 'in bar'                          => 'ARRAYREF context';
-
-
-use Contextual::Return;
-
-sub bar {
-    NUM { 42 }
-    RECOVER { RESULT { RESULT()+1 } }
-}
-
-is 0+bar(), 43,                                 => 'RESULT()';

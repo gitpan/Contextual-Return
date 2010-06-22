@@ -15,7 +15,7 @@ sub foo {
 sub ok_if_warn {
     my ($msg, $line) = @_;
     return sub {
-        # diag( "Caught warning: '@_'" );
+#        diag( "Caught warning: '@_'" );
         ok $_[0] =~ $msg           => "Warn msg correct at $line";
         ok $_[0] =~ /line $line\Z/ => "Line number correct at $line";
     }
@@ -58,3 +58,20 @@ eval { double_or_nothing(); };
 my $exception = $@;
 ok $exception   => 'Exception on repetition';
 like $exception, qr/Can't install two LIST handlers/ => 'Correct exception';
+
+eval "use Contextual::Return 'HANDLER'; ";
+use Data::Dumper 'Dumper';
+$exception = $@;
+ok $exception   => 'Exception on bad export name';
+like $exception, qr/^Can't export HANDLER: no such handler/
+                => 'Correct exception';
+
+eval "use Contextual::Return {HANDLER=>'FOO'}; ";
+use Data::Dumper 'Dumper';
+$exception = $@;
+ok $exception   => 'Exception on bad export type';
+like $exception, qr/^Can't use HASH as export specifier/
+                => 'Correct exception';
+
+local $SIG{__WARN__} = ok_if_warn q{didn't export anything}, 1;
+eval 'use Contextual::Return qr/HANDLER/';
