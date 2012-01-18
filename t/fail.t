@@ -16,11 +16,12 @@ sub fail_with_message {
     return FAIL { 'fail_with_message() failed' }
 }
 
-if ( ::fail_with_message() ) {
+if ( my $result = ::fail_with_message() ) {
     ok 0    => 'Unexpected succeeded in bool context';
 }
 else {
     ok 1    => 'Failed as expected in bool context';
+    like $result->error, qr/^fail_with_message\(\) failed/ => 'Failed with expected message';
 }
 
 eval_nok { fail_with_message() }

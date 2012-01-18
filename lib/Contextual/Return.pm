@@ -4,11 +4,19 @@ package Contextual::Return;
 BEGIN {
     no warnings 'redefine';
 
+    my $fallback_caller = *CORE::GLOBAL::caller{CODE};
     *CORE::GLOBAL::caller = sub {
         my ($uplevels) = shift || 0;
-        return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
-            if $Contextual::Return::uplevel;
-        return CORE::caller($uplevels + 1);
+        if ($fallback_caller) {
+            return $fallback_caller->($uplevels + 2 + $Contextual::Return::uplevel)
+                if $Contextual::Return::uplevel;
+            return $fallback_caller->($uplevels + 1);
+        }
+        else {
+            return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
+                if $Contextual::Return::uplevel;
+            return CORE::caller($uplevels + 1);
+        }
     };
 
     use Carp;
@@ -27,7 +35,7 @@ BEGIN {
 
 }
 
-our $VERSION = '0.003001';
+our $VERSION = '0.003002';
 
 use warnings;
 use strict;
@@ -48,7 +56,7 @@ sub _in_context {
         my ($package, $file, $line, $sub) = CORE::caller($stack_frame++);
 
         # Fall off the top of the stack...
-        last if !defined $package;
+        last STACK_FRAME if !defined $package;
 
         # Ignore this module (and any helpers)...
         next STACK_FRAME if $package =~ m{^Contextual::Return}xms;
@@ -282,6 +290,9 @@ sub LIST (;&$) {
     if (!refaddr $crv) {
         my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
         my $subname = (CORE::caller(1))[3];
+        if (!defined $subname) {
+            $subname = 'bare LIST {...}';
+        }
         $crv = bless \my $scalar, 'Contextual::Return::Value';
         $attrs = $attrs_of{refaddr $crv} = { args => $args, sub => $subname };
     }
@@ -326,7 +337,7 @@ sub LIST (;&$) {
     if (!defined $wantarray) {
         handler:
         for my $context (qw< VOID DEFAULT >) {
-            my $handler = $attrs->{$context} or next;
+            my $handler = $attrs->{$context} or next handler;
 
             eval { $attrs->{$context}->(@{$attrs->{args}}) };
             if ($recover) {
@@ -335,7 +346,7 @@ sub LIST (;&$) {
             elsif ($@) {
                 die $@;
             }
-            last;
+            last handler;
         }
         return;
     }
@@ -357,6 +368,9 @@ sub VOID (;&$) {
     if (!refaddr $crv) {
         my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
         my $subname = (CORE::caller(1))[3];
+        if (!defined $subname) {
+            $subname = 'bare VOID {...}';
+        }
         $crv = bless \my $scalar, 'Contextual::Return::Value';
         $attrs = $attrs_of{refaddr $crv} = { args => $args, sub => $subname };
     }
@@ -384,7 +398,7 @@ sub VOID (;&$) {
         # List or ancestral handlers...
         handler:
         for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context} or next;
+            my $handler = $attrs->{$context} or next handler;
 
             my @rv = eval { $handler->(@{$attrs->{args}}) };
             if ($recover) {
@@ -470,6 +484,9 @@ for my $context (qw( SCALAR NONVOID )) {
         if (!refaddr $crv) {
             my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
             my $subname = (CORE::caller(1))[3];
+            if (!defined $subname) {
+                $subname = "bare $context {...}";
+            }
             $crv = bless \my $scalar, 'Contextual::Return::Value';
             $attrs = $attrs_of{refaddr $crv}
                     = { args => $args, sub => $subname };
@@ -500,7 +517,7 @@ for my $context (qw( SCALAR NONVOID )) {
             # List or ancestral handlers...
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -548,7 +565,7 @@ for my $context (qw( SCALAR NONVOID )) {
         if (!defined $wantarray) {
             handler:
             for my $context (qw< VOID DEFAULT >) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -558,7 +575,7 @@ for my $context (qw( SCALAR NONVOID )) {
                     die $@;
                 }
 
-                last;
+                last handler;
             }
             return;
         }
@@ -568,11 +585,12 @@ for my $context (qw( SCALAR NONVOID )) {
     }
 }
 
+handler:
 for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
-    next if $context_name eq 'LIST'       # These
-         || $context_name eq 'VOID'       #  four
-         || $context_name eq 'SCALAR'     #   handled
-         || $context_name eq 'NONVOID';   #    separately
+    next handler if $context_name eq 'LIST'       # These
+                 || $context_name eq 'VOID'       #  four
+                 || $context_name eq 'SCALAR'     #   handled
+                 || $context_name eq 'NONVOID';   #    separately
 
     no strict qw( refs );
     *{$context_name} = sub (&;$) {
@@ -583,6 +601,9 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
         if (!refaddr $crv) {
             my $args = do{ package DB; ()=CORE::caller(1); \@DB::args };
             my $subname = (CORE::caller(1))[3];
+            if (!defined $subname) {
+                $subname = "bare $context_name {...}";
+            }
             $crv = bless \my $scalar, 'Contextual::Return::Value';
             $attrs = $attrs_of{refaddr $crv}
                      = { args => $args, sub => $subname };
@@ -618,7 +639,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
             # List or ancestral handlers...
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -673,7 +694,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
         if (!defined $wantarray) {
             handler:
             for my $context (qw(VOID DEFAULT)) {
-                next if !$attrs->{$context};
+                next handler if !$attrs->{$context};
 
                 eval { $attrs->{$context}->(@{$attrs->{args}}) };
 
@@ -684,7 +705,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
                     die $@;
                 }
 
-                last;
+                last handler;
             }
             return;
         }
@@ -823,7 +844,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(STR SCALAR LAZY VALUE NONVOID DEFAULT NUM)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -866,7 +887,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(NUM SCALAR LAZY VALUE NONVOID DEFAULT STR)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -914,7 +935,7 @@ BEGIN {
 
             handler:
             for my $context (@PUREBOOL, qw(BOOL SCALAR LAZY VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -962,7 +983,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(SCALARREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1007,7 +1028,7 @@ BEGIN {
             local $Contextual::Return::__RESULT__;
             handler:
             for my $context (qw(ARRAYREF REF)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::uplevel = 2;
                 my $rv = eval { $handler->(@{$attrs->{args}}) };
@@ -1041,7 +1062,7 @@ BEGIN {
             }
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::uplevel = 2;
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
@@ -1076,7 +1097,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(HASHREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1123,7 +1144,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(CODEREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1170,7 +1191,7 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(GLOBREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next;
+                my $handler = $attrs->{$context} or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1299,7 +1320,7 @@ sub AUTOLOAD {
             if (wantarray) {
                 my @result = eval {
                     local $_ = $requested_method;
-                    $method_handler->(@_);
+                    $method_handler->($self,@_);
                 };
                 die _in_context $@ if $@;
                 return @result;
@@ -1307,7 +1328,7 @@ sub AUTOLOAD {
             else {
                 my $result = eval {
                     local $_ = $requested_method;
-                    $method_handler->(@_);
+                    $method_handler->($self,@_);
                 };
                 die _in_context $@ if $@;
                 return $result;
@@ -1318,7 +1339,7 @@ sub AUTOLOAD {
     # Next, try to create an object on which to call the method...
     handler:
     for my $context (qw(OBJREF STR SCALAR LAZY VALUE NONVOID DEFAULT)) {
-        my $handler = $attrs->{$context} or next;
+        my $handler = $attrs->{$context} or next handler;
 
         local $Contextual::Return::__RESULT__;
         local $Contextual::Return::uplevel = 2;
@@ -1421,7 +1442,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.003001
+This document describes Contextual::Return version 0.003002
 
 
 =head1 SYNOPSIS
@@ -2194,6 +2215,17 @@ but you can change that message by providing a block to the C<FAIL>, like so:
 in which case, the final value of the block becomes the exception message:
 
     No more data at demo.pl line 42
+
+A failure value can be interrogated for its error message, by calling its
+C<error()> method, like so:
+
+    my $val = get_next_val();
+    if ($val) {
+        print "[$val]\n";
+    }
+    else {
+        print $val->error, "\n";
+    }
 
 
 =head2 Configurable failure contexts
@@ -3204,6 +3236,16 @@ context block corresponding to the offending context (or perhaps a
 C<DEFAULT {...}> block).
 
 
+=item C<Can't call bare %s {...} in %s context>
+
+You specified a handler (such as C<VOID {...}> or C<LIST {...}>)
+outside any subroutine, and in a context that it
+can't handle. Did you mean to place the handler outside of a subroutine?
+If so, then you need to put it in a context it can actually handle.
+Otherwise, perhaps you need to replace the trailing block with parens
+(that is: C<VOID()> or C<LIST()>).
+
+
 =item C<%s can't return a %s reference">
 
 You called the subroutine in a context that expected to get back a
@@ -3337,7 +3379,7 @@ Damian Conway  C<< <DCONWAY@cpan.org> >>
 
 =head1 LICENCE AND COPYRIGHT
 
-Copyright (c) 2005-2006, Damian Conway C<< <DCONWAY@cpan.org> >>. All rights reserved.
+Copyright (c) 2005-2011, Damian Conway C<< <DCONWAY@cpan.org> >>. All rights reserved.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.

@@ -78,3 +78,13 @@ Revision history for Contextual-Return
       under the debugger (thanks Steven)
 
     - Documented METHOD handlers
+
+
+0.003002  Thu Jan 19 09:27:29 2012
+
+    - Updated version number of Contextual::Return::Failure
+      to placate CPAN indexer
+
+    - Improved error messages for bare handlers in bad contexts (thanks Mathew)
+
+    - Work around problems with Test::More and caller

@@ -1,5 +1,5 @@
 package Contextual::Return::Failure;
-#use version; $VERSION = qv('0.0.2');
+our $VERSION = 0.000_003;
 
 use Contextual::Return;
 BEGIN { *_in_context = *Contextual::Return::_in_context }
@@ -109,6 +109,9 @@ sub _FAIL (;&) {
             else {
                 die _in_context $exception, "Attempted to use failure value"
             }
+        }
+        METHOD {
+            error => sub { _in_context $exception }
         }
 }
 

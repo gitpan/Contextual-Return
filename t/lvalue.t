@@ -43,3 +43,16 @@ ok !$foo          => "Ex-post-boolification";
 foo();
 
 my $f = \foo();
+
+
+{
+    sub foo2 : lvalue {
+        LVALUE {
+            ok 1;
+        }
+    }
+}
+
+for my $foo (foo2) {
+    $foo = 99;
+}

@@ -18,4 +18,7 @@ is $_, 42                                           => 'Pure boolean assigned';
 is ref $_, 'Contextual::Return::Value'              => 'RETOBJ is object';
 
 my $x;
+undef $_;
 is do{ ($x = ::foo()) ? 'true' : 'false' }, 'true'  => 'BOOLEAN context';
+
+ok !defined $_                                      => 'RETOBJ not assigned';
