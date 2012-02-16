@@ -35,7 +35,7 @@ BEGIN {
 
 }
 
-our $VERSION = '0.004000';
+our $VERSION = '0.004001';
 
 use warnings;
 use strict;
@@ -1626,7 +1626,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004000
+This document describes Contextual::Return version 0.004001
 
 
 =head1 SYNOPSIS
@@ -2257,7 +2257,7 @@ will still be delegated to the object returned by the C<OBJREF> handler
 (if it is also specified).
 
 
-=head 3 Preventing fallbacks
+=head3 Preventing fallbacks
 
 Sometimes fallbacks can be too helpful. Or sometimes you want to impose
 strict type checking on a return value.

@@ -96,3 +96,8 @@ Revision history for Contextual-Return
 
     - Added STRICT modifier to prevent fallbacks
       (i.e. impose strict typing on return values)
+
+
+0.004001  Thu Feb 16 19:01:05 2012
+
+    - Fixed annoying POD nit (thanks Salvatore)

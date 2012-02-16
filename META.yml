@@ -21,4 +21,4 @@ requires:
   Test::More: 0
   Want: 0
   version: 0
-version: 0.004000
+version: 0.004001
