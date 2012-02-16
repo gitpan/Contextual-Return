@@ -35,7 +35,7 @@ BEGIN {
 
 }
 
-our $VERSION = '0.003002';
+our $VERSION = '0.004000';
 
 use warnings;
 use strict;
@@ -107,7 +107,7 @@ my @ALL_EXPORTS = (
     qw(
         LAZY       RESULT      RVALUE      METHOD     FAIL
         FIXED      RECOVER     LVALUE      RETOBJ     FAIL_WITH
-        ACTIVE     CLEANUP     NVALUE 
+        ACTIVE     CLEANUP     NVALUE      STRICT
     )
 );
 
@@ -267,16 +267,115 @@ BEGIN {
     }
 }
 
-sub FIXED ($) {
-    my ($crv) = @_;
-    $attrs_of{refaddr $crv}{FIXED} = 1;
-    return $crv;
-}
+for my $modifier_name (qw< STRICT FIXED ACTIVE >) {
+    no strict 'refs';
+    *{$modifier_name} = sub ($) {
+        my ($crv) = @_;
+        my $attrs = $attrs_of{refaddr $crv};
 
-sub ACTIVE ($) {
-    my ($crv) = @_;
-    $attrs_of{refaddr $crv}{ACTIVE} = 1;
-    return $crv;
+        # Track context...
+        my $wantarray = wantarray;
+        use Want;
+        $attrs->{want_pure_bool} ||= Want::want('BOOL');
+
+        # Remember the modification...
+        $attrs->{$modifier_name} = 1;
+
+        # Prepare for exception handling...
+        my $recover = $attrs->{RECOVER};
+        local $Contextual::Return::uplevel = 2;
+
+        # Handle list context directly, if possible...
+        if ($wantarray) {
+            local $Contextual::Return::__RESULT__;
+            # List or ancestral handlers...
+            handler:
+            for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
+                my $handler = $attrs->{$context} 
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
+
+                my @rv = eval { $handler->(@{$attrs->{args}}) };
+                if ($recover) {
+                    if (!$Contextual::Return::__RESULT__) {
+                        $Contextual::Return::__RESULT__ = [@rv];
+                    }
+                    () = $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                return @rv if !$Contextual::Return::__RESULT__;
+                return @{$Contextual::Return::__RESULT__};
+            }
+            # Convert to list from arrayref handler...
+            if (!$attrs->{STRICT} and my $handler = $attrs->{ARRAYREF}) {
+                my $array_ref = eval { $handler->(@{$attrs->{args}}) };
+
+                if ($recover) {
+                    if (!$Contextual::Return::__RESULT__) {
+                        $Contextual::Return::__RESULT__ = [$array_ref];
+                    }
+                    scalar $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+
+                # Array ref may be returned directly, or via RESULT{}...
+                $array_ref = $Contextual::Return::__RESULT__->[0]
+                    if $Contextual::Return::__RESULT__;
+
+                return @{$array_ref} if (ref $array_ref||q{}) eq 'ARRAY';
+            }
+            # Return scalar object as one-elem list, if possible...
+            handler:
+            for my $context (qw(BOOL STR NUM VALUE SCALAR LAZY)) {
+                last handler if $attrs->{STRICT};
+                return $crv if exists $attrs->{$context};
+            }
+            $@ = _in_context "Can't call $attrs->{sub} in a list context";
+            if ($recover) {
+                () = $recover->(@{$attrs->{args}});
+            }
+            else {
+                die $@;
+            }
+        }
+
+        # Handle void context directly...
+        if (!defined $wantarray) {
+            handler:
+            for my $context (qw< VOID DEFAULT >) {
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
+
+                eval { $attrs->{$context}->(@{$attrs->{args}}) };
+                if ($recover) {
+                    $recover->(@{$attrs->{args}});
+                }
+                elsif ($@) {
+                    die $@;
+                }
+                last handler;
+            }
+            if ($attrs->{STRICT}) {
+                $@ = _in_context "Can't call $attrs->{sub} in a void context";
+                if ($recover) {
+                    () = $recover->(@{$attrs->{args}});
+                }
+                else {
+                    die $@;
+                }
+            }
+            return;
+        }
+
+        # Otherwise, let someone else handle it...
+        return $crv;
+    }
 }
 
 sub LIST (;&$) {
@@ -315,7 +414,7 @@ sub LIST (;&$) {
     local $Contextual::Return::uplevel = 2;
 
     # Handle list context directly...
-    if (wantarray) {
+    if ($wantarray) {
         local $Contextual::Return::__RESULT__;
 
         my @rv = eval { $block->(@{$attrs->{args}}) };
@@ -337,7 +436,9 @@ sub LIST (;&$) {
     if (!defined $wantarray) {
         handler:
         for my $context (qw< VOID DEFAULT >) {
-            my $handler = $attrs->{$context} or next handler;
+            my $handler = $attrs->{$context}
+                or $attrs->{STRICT} and last handler
+                or next handler;
 
             eval { $attrs->{$context}->(@{$attrs->{args}}) };
             if ($recover) {
@@ -347,6 +448,15 @@ sub LIST (;&$) {
                 die $@;
             }
             last handler;
+        }
+        if ($attrs->{STRICT}) {
+            $@ = _in_context "Can't call $attrs->{sub} in a void context";
+            if ($recover) {
+                () = $recover->(@{$attrs->{args}});
+            }
+            else {
+                die $@;
+            }
         }
         return;
     }
@@ -393,12 +503,14 @@ sub VOID (;&$) {
     local $Contextual::Return::uplevel = 2;
 
     # Handle list context directly, if possible...
-    if (wantarray) {
+    if ($wantarray) {
         local $Contextual::Return::__RESULT__;
         # List or ancestral handlers...
         handler:
         for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-            my $handler = $attrs->{$context} or next handler;
+            my $handler = $attrs->{$context} 
+                or $attrs->{STRICT} and last handler
+                or next handler;
 
             my @rv = eval { $handler->(@{$attrs->{args}}) };
             if ($recover) {
@@ -415,7 +527,7 @@ sub VOID (;&$) {
             return @{$Contextual::Return::__RESULT__};
         }
         # Convert to list from arrayref handler...
-        if (my $handler = $attrs->{ARRAYREF}) {
+        if (!$attrs->{STRICT} and my $handler = $attrs->{ARRAYREF}) {
             my $array_ref = eval { $handler->(@{$attrs->{args}}) };
 
             if ($recover) {
@@ -437,9 +549,10 @@ sub VOID (;&$) {
         # Return scalar object as one-elem list, if possible...
         handler:
         for my $context (qw(BOOL STR NUM VALUE SCALAR LAZY)) {
+            last handler if $attrs->{STRICT};
             return $crv if exists $attrs->{$context};
         }
-        $@ = _in_context "Can't call $attrs->{sub} in list context";
+        $@ = _in_context "Can't call $attrs->{sub} in a list context";
         if ($recover) {
             () = $recover->(@{$attrs->{args}});
         }
@@ -503,7 +616,7 @@ for my $context (qw( SCALAR NONVOID )) {
 
         # Identify contexts...
         my $wantarray = wantarray;
-        use Want;
+        use Want ();
         $attrs->{want_pure_bool} ||= Want::want('BOOL');
 
         # Prepare for exception handling...
@@ -511,13 +624,15 @@ for my $context (qw( SCALAR NONVOID )) {
         local $Contextual::Return::uplevel = 2;
 
         # Handle list context directly, if possible...
-        if (wantarray) {
+        if ($wantarray) {
             local $Contextual::Return::__RESULT__;
 
             # List or ancestral handlers...
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context} 
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -534,7 +649,7 @@ for my $context (qw( SCALAR NONVOID )) {
                 return @{$Contextual::Return::__RESULT__};
             }
             # Convert to list from arrayref handler...
-            if (my $handler = $attrs->{ARRAYREF}) {
+            if (!$attrs->{STRICT} and my $handler = $attrs->{ARRAYREF}) {
 
                 my $array_ref = eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -556,16 +671,19 @@ for my $context (qw( SCALAR NONVOID )) {
             # Return scalar object as one-elem list, if possible...
             handler:
             for my $context (qw(BOOL STR NUM VALUE SCALAR LAZY)) {
+                last if $attrs->{STRICT};
                 return $crv if exists $attrs->{$context};
             }
-            die _in_context "Can't call $attrs->{sub} in list context";
+            die _in_context "Can't call $attrs->{sub} in a list context";
         }
 
         # Handle void context directly...
         if (!defined $wantarray) {
             handler:
             for my $context (qw< VOID DEFAULT >) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -576,6 +694,15 @@ for my $context (qw( SCALAR NONVOID )) {
                 }
 
                 last handler;
+            }
+            if ($attrs->{STRICT}) {
+                $@ = _in_context "Can't call $attrs->{sub} in a void context";
+                if ($recover) {
+                    () = $recover->(@{$attrs->{args}});
+                }
+                else {
+                    die $@;
+                }
             }
             return;
         }
@@ -622,7 +749,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
 
         # Identify contexts...
         my $wantarray = wantarray;
-        use Want;
+        use Want ();
         $attrs->{want_pure_bool} ||= Want::want('BOOL');
 
         # Prepare for exception handling...
@@ -630,7 +757,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
         local $Contextual::Return::uplevel = 2;
 
         # Handle list context directly, if possible...
-        if (wantarray) {
+        if ($wantarray) {
             local $Contextual::Return::__RESULT__
                 = $context_name eq 'RECOVER' ? $Contextual::Return::__RESULT__
                 :                              undef
@@ -639,7 +766,9 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
             # List or ancestral handlers...
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
                 if ($recover) {
@@ -656,7 +785,7 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
                 return @{$Contextual::Return::__RESULT__};
             }
             # Convert to list from arrayref handler...
-            if (my $handler = $attrs->{ARRAYREF}) {
+            if (!$attrs->{STRICT} and my $handler = $attrs->{ARRAYREF}) {
                 local $Contextual::Return::uplevel = 2;
 
                 # Array ref may be returned directly, or via RESULT{}...
@@ -679,9 +808,10 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
             # Return scalar object as one-elem list, if possible...
             handler:
             for my $context (qw(BOOL STR NUM VALUE SCALAR LAZY)) {
+                last if $attrs->{STRICT};
                 return $crv if exists $attrs->{$context};
             }
-            $@ = _in_context "Can't call $attrs->{sub} in list context";
+            $@ = _in_context "Can't call $attrs->{sub} in a list context";
             if ($recover) {
                 () = $recover->(@{$attrs->{args}});
             }
@@ -694,7 +824,10 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
         if (!defined $wantarray) {
             handler:
             for my $context (qw(VOID DEFAULT)) {
-                next handler if !$attrs->{$context};
+                if (!$attrs->{$context}) {
+                    last handler if $attrs->{STRICT};
+                    next handler;
+                }
 
                 eval { $attrs->{$context}->(@{$attrs->{args}}) };
 
@@ -706,6 +839,15 @@ for my $context_name (@CONTEXTS, qw< RECOVER _internal_LIST CLEANUP >) {
                 }
 
                 last handler;
+            }
+            if ($attrs->{STRICT}) {
+                $@ = _in_context "Can't call $attrs->{sub} in a void context";
+                if ($recover) {
+                    () = $recover->(@{$attrs->{args}});
+                }
+                else {
+                    die $@;
+                }
             }
             return;
         }
@@ -844,7 +986,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(STR SCALAR LAZY VALUE NONVOID DEFAULT NUM)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -872,7 +1016,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "Can't call $attrs->{sub} in string context";
+            $@ = _in_context "Can't use return value of $attrs->{sub} as a string";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -887,7 +1031,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(NUM SCALAR LAZY VALUE NONVOID DEFAULT STR)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -915,7 +1061,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "Can't call $attrs->{sub} in numeric context";
+            $@ = _in_context "Can't use return value of $attrs->{sub} as a number";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -934,8 +1080,10 @@ BEGIN {
             $attrs->{want_pure_bool} = 0;
 
             handler:
-            for my $context (@PUREBOOL, qw(BOOL SCALAR LAZY VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+            for my $context (@PUREBOOL, qw(BOOL STR NUM SCALAR LAZY VALUE NONVOID DEFAULT)) {
+                my $handler = $attrs->{$context}
+                    or $context eq 'BOOL' and $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -969,7 +1117,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "Can't call $attrs->{sub} in boolean context";
+            $@ = _in_context "Can't use return value of $attrs->{sub} as a boolean";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -983,7 +1131,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(SCALARREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1016,6 +1166,17 @@ BEGIN {
                 }
                 return $rv;
             }
+
+            if ($attrs->{STRICT}) {
+                $@ = _in_context "$attrs->{sub} can't return a scalar reference";
+                if (my $recover = $attrs->{RECOVER}) {
+                    scalar $recover->(@{$attrs->{args}});
+                }
+                else {
+                    die $@;
+                }
+            }
+
             if ( $attrs->{FIXED} ) {
                 $_[0] = \$self;
             }
@@ -1028,7 +1189,9 @@ BEGIN {
             local $Contextual::Return::__RESULT__;
             handler:
             for my $context (qw(ARRAYREF REF)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::uplevel = 2;
                 my $rv = eval { $handler->(@{$attrs->{args}}) };
@@ -1062,7 +1225,9 @@ BEGIN {
             }
             handler:
             for my $context (qw(LIST VALUE NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                last handler if $attrs->{STRICT};
+                my $handler = $attrs->{$context}
+                    or next handler;
 
                 local $Contextual::Return::uplevel = 2;
                 my @rv = eval { $handler->(@{$attrs->{args}}) };
@@ -1089,6 +1254,17 @@ BEGIN {
                 }
                 return \@rv;
             }
+
+            if ($attrs->{STRICT}) {
+                $@ = _in_context "$attrs->{sub} can't return an array reference";
+                if (my $recover = $attrs->{RECOVER}) {
+                    scalar $recover->(@{$attrs->{args}});
+                }
+                else {
+                    die $@;
+                }
+            }
+
             return [ $self ];
         },
         '%{}' => sub {
@@ -1097,7 +1273,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(HASHREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1144,7 +1322,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(CODEREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1191,7 +1371,9 @@ BEGIN {
             my $attrs = $attrs_of{refaddr $self};
             handler:
             for my $context (qw(GLOBREF REF NONVOID DEFAULT)) {
-                my $handler = $attrs->{$context} or next handler;
+                my $handler = $attrs->{$context}
+                    or $attrs->{STRICT} and last handler
+                    or next handler;
 
                 local $Contextual::Return::__RESULT__;
                 local $Contextual::Return::uplevel = 2;
@@ -1339,7 +1521,9 @@ sub AUTOLOAD {
     # Next, try to create an object on which to call the method...
     handler:
     for my $context (qw(OBJREF STR SCALAR LAZY VALUE NONVOID DEFAULT)) {
-        my $handler = $attrs->{$context} or next handler;
+        my $handler = $attrs->{$context}
+            or $attrs->{STRICT} and last handler
+            or next handler;
 
         local $Contextual::Return::__RESULT__;
         local $Contextual::Return::uplevel = 2;
@@ -1442,7 +1626,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.003002
+This document describes Contextual::Return version 0.004000
 
 
 =head1 SYNOPSIS
@@ -2071,6 +2255,47 @@ passed to the handler in C<$_>, and the method's argument list is passed
 Note that any methods not explicitly handled by the C<METHOD> handlers
 will still be delegated to the object returned by the C<OBJREF> handler
 (if it is also specified).
+
+
+=head 3 Preventing fallbacks
+
+Sometimes fallbacks can be too helpful. Or sometimes you want to impose
+strict type checking on a return value.
+
+Contextual::Returns allows that via the C<STRICT> specifier. If you include
+C<STRICT> anywhere in your return statement, the module disables all 
+fallbacks and will therefore through an exception if the return value is
+used in any way not explicitly specified in the contextual return sequence.
+
+For example, to create a subroutine that returns only a string:
+
+    sub get_name {
+        return STRICT STR { 'Bruce' }
+    }
+
+If the return value of the subroutine is used in any other way than as
+a string, an exception will be thrown.
+
+You can still specify handlers for more than a single kind of context
+when using C<STRICT>:
+
+    sub get_name {
+        return STRICT
+            STR  { 'Bruce' }
+            BOOL { 0 }
+    }
+
+...but these will still be the only contexts in which the return value
+can be used:
+
+    my $n = get_name() ? 1 : 2;  # Okay because BOOL handler specified
+
+    my $n = 'Dr' . get_name();   # Okay because STR handler specified
+
+    my $n = 1 + get_name();      # Exception thrown because no NUM handler
+
+In other words, C<STRICT> allows you to impose strict type checking on
+your contextual return value.
 
 
 =head2 Deferring handlers
@@ -3227,7 +3452,9 @@ name of a context handler to be exported, but the module doesn't export a
 handler of that name. Check the spelling for the requested export.
 
 
-=item C<Can't call %s in %s context>
+=item C<Can't call %s in a %s context>
+
+=item C<Can't use return value of %s in a %s context>
 
 The subroutine you called uses a contextual return, but doesn't specify what
 to return in the particular context in which you called it. You either need to

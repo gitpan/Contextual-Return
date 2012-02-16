@@ -36,3 +36,5 @@ t/simple_export.t
 t/simple_prefix.t
 t/simple_rename.t
 t/try
+t/STRICT.t
+META.json                                Module JSON meta-data (added by MakeMaker)

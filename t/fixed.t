@@ -23,6 +23,13 @@ sub bar {
     ;
 }
 
+sub bar_list {
+    return FIXED
+        STR       { 'forty-two' }
+        LIST      { 1,2,3 }
+    ;
+}
+
 sub baz {
     return 'in baz';
 }
@@ -90,6 +97,9 @@ my $oref = ::foo();
 is ref($oref), $CLASS                     => 'Before usage, it is a C::R::V';
 is $oref->bar, "baaaaa!\n"                => 'OBJREF context';
 isnt ref($oref), $CLASS                   => 'After usage, it is not a C::R::V';
+
+my @bar_list = ::bar_list();
+is_deeply \@bar_list, [1,2,3]             => 'List context works correctly';
 
 package Bar;
 

@@ -88,3 +88,11 @@ Revision history for Contextual-Return
     - Improved error messages for bare handlers in bad contexts (thanks Mathew)
 
     - Work around problems with Test::More and caller
+
+
+0.004000  Thu Feb 16 14:30:56 2012
+
+    - Fixed context propagation bugs in FIXED and ACTIVE modifiers
+
+    - Added STRICT modifier to prevent fallbacks
+      (i.e. impose strict typing on return values)
