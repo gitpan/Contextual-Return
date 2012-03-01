@@ -35,7 +35,7 @@ BEGIN {
 
 }
 
-our $VERSION = '0.004001';
+our $VERSION = '0.004002';
 
 use warnings;
 use strict;
@@ -162,7 +162,7 @@ sub _add_exports_for {
     elsif ($selector_type eq 'Regexp') {
         my @selected = grep {/$selector/} @ALL_EXPORTS;
         if (!@selected) {
-            Carp:carp("use Contextual::Return $selector didn't export anything");
+            Carp::carp("use Contextual::Return $selector didn't export anything");
         }
         return map { $_ => sprintf($renamer, $_) } @selected;
     }
@@ -1626,7 +1626,7 @@ Contextual::Return - Create context-senstive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004001
+This document describes Contextual::Return version 0.004002
 
 
 =head1 SYNOPSIS

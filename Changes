@@ -101,3 +101,9 @@ Revision history for Contextual-Return
 0.004001  Thu Feb 16 19:01:05 2012
 
     - Fixed annoying POD nit (thanks Salvatore)
+
+
+0.004002  Fri Mar  2 06:18:38 2012
+
+    - Fixed significant typo (Carp:carp -> Carp::carp)
+      (thanks everyone who reported it)
