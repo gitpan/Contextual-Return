@@ -16,8 +16,8 @@ sub ok_if_warn {
     my ($msg, $line) = @_;
     return sub {
 #        diag( "Caught warning: '@_'" );
-        ok $_[0] =~ $msg           => "Warn msg correct at line $line";
-        ok $_[0] =~ /line $line\Z/ => "Line number correct at line $line";
+        ok $_[0] =~ $msg              => "Warn msg correct at line $line";
+        ok $_[0] =~ /line $line\.?\Z/ => "Line number correct at line $line";
     }
 }
 

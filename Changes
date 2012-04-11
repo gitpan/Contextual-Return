@@ -107,3 +107,11 @@ Revision history for Contextual-Return
 
     - Fixed significant typo (Carp:carp -> Carp::carp)
       (thanks everyone who reported it)
+
+
+0.004003  Wed Apr 11 07:55:49 2012
+
+    - Doc patch (thanks Fabrizio)
+
+    - Patched failures.t to account from bleadperl changes
+      (thanks Zefram!)

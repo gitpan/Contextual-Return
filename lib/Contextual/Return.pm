@@ -35,7 +35,7 @@ BEGIN {
 
 }
 
-our $VERSION = '0.004002';
+our $VERSION = '0.004003';
 
 use warnings;
 use strict;
@@ -1168,7 +1168,7 @@ BEGIN {
             }
 
             if ($attrs->{STRICT}) {
-                $@ = _in_context "$attrs->{sub} can't return a scalar reference";
+                $@ = _in_context "Call to $attrs->{sub} didn't return a scalar reference, as required <LOC>";
                 if (my $recover = $attrs->{RECOVER}) {
                     scalar $recover->(@{$attrs->{args}});
                 }
@@ -1256,7 +1256,7 @@ BEGIN {
             }
 
             if ($attrs->{STRICT}) {
-                $@ = _in_context "$attrs->{sub} can't return an array reference";
+                $@ = _in_context "Call to $attrs->{sub} didn't return an array reference, as required <LOC>";
                 if (my $recover = $attrs->{RECOVER}) {
                     scalar $recover->(@{$attrs->{args}});
                 }
@@ -1308,7 +1308,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "$attrs->{sub} can't return a hash reference";
+            $@ = _in_context "Call to $attrs->{sub} didn't return a hash reference, as required <LOC>";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -1357,7 +1357,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "$attrs->{sub} can't return a subroutine reference";
+            $@ = _in_context "Call to $attrs->{sub} didn't return a subroutine reference, as required <LOC>";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -1406,7 +1406,7 @@ BEGIN {
                 }
                 return $rv;
             }
-            $@ = _in_context "$attrs->{sub} can't return a typeglob reference";
+            $@ = _in_context "Call to $attrs->{sub} didn't return a typeglob reference, as required <LOC>";
             if (my $recover = $attrs->{RECOVER}) {
                 scalar $recover->(@{$attrs->{args}});
             }
@@ -1621,12 +1621,12 @@ __END__
 
 =head1 NAME
 
-Contextual::Return - Create context-senstive return values
+Contextual::Return - Create context-sensitive return values
 
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004002
+This document describes Contextual::Return version 0.004003
 
 
 =head1 SYNOPSIS
@@ -3473,7 +3473,7 @@ Otherwise, perhaps you need to replace the trailing block with parens
 (that is: C<VOID()> or C<LIST()>).
 
 
-=item C<%s can't return a %s reference">
+=item C<Call to %s at %s didn't return a %s reference">
 
 You called the subroutine in a context that expected to get back a
 reference of some kind but the subroutine didn't specify the

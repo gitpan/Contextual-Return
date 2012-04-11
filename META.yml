@@ -1,5 +1,5 @@
 ---
-abstract: 'Create context-senstive return values'
+abstract: 'Create context-sensitive return values'
 author:
   - 'Damian Conway <DCONWAY@cpan.org>'
 build_requires:
@@ -21,4 +21,4 @@ requires:
   Test::More: 0
   Want: 0
   version: 0
-version: 0.004002
+version: 0.004003
