@@ -1,7 +1,5 @@
-Build.PL
 Changes
 MANIFEST
-META.yml # Will be created by "make dist"
 Makefile.PL
 README
 lib/Contextual/Return.pm
@@ -37,4 +35,6 @@ t/simple_prefix.t
 t/simple_rename.t
 t/try
 t/STRICT.t
-META.json                                Module JSON meta-data (added by MakeMaker)
+t/blessed.t
+t/confess.t
+META.yml                                 Module meta-data (added by MakeMaker)

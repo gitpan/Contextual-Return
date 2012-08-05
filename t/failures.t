@@ -17,7 +17,8 @@ sub ok_if_warn {
     return sub {
 #        diag( "Caught warning: '@_'" );
         ok $_[0] =~ $msg              => "Warn msg correct at line $line";
-        ok $_[0] =~ /line $line\.?\Z/ => "Line number correct at line $line";
+        ok $_[0] =~ /line $line\.?\Z/ => "Line number correct at line $line"
+            if $line;
     }
 }
 
@@ -73,5 +74,5 @@ ok $exception   => 'Exception on bad export type';
 like $exception, qr/^Can't use HASH as export specifier/
                 => 'Correct exception';
 
-local $SIG{__WARN__} = ok_if_warn q{didn't export anything}, 1;
+local $SIG{__WARN__} = ok_if_warn q{didn't export anything};
 eval 'use Contextual::Return qr/HANDLER/';

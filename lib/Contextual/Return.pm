@@ -1,21 +1,38 @@
 package Contextual::Return;
 
-# Fake out CORE::GLOBAL::caller and Carp very early...
+my %attrs_of;
+
+# Fake out CORE::GLOBAL::caller, Carp::*, and Scalar::Util::blessed() very early...
 BEGIN {
     no warnings 'redefine';
 
     my $fallback_caller = *CORE::GLOBAL::caller{CODE};
     *CORE::GLOBAL::caller = sub {
         my ($uplevels) = shift || 0;
-        if ($fallback_caller) {
-            return $fallback_caller->($uplevels + 2 + $Contextual::Return::uplevel)
-                if $Contextual::Return::uplevel;
-            return $fallback_caller->($uplevels + 1);
+        if (CORE::caller eq 'DB') {
+            package DB;
+            if ($fallback_caller) {
+                return $fallback_caller->($uplevels + 2 + $Contextual::Return::uplevel)
+                    if $Contextual::Return::uplevel;
+                return $fallback_caller->($uplevels + 1);
+            }
+            else {
+                return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
+                    if $Contextual::Return::uplevel;
+                return CORE::caller($uplevels + 1);
+            }
         }
         else {
-            return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
-                if $Contextual::Return::uplevel;
-            return CORE::caller($uplevels + 1);
+            if ($fallback_caller) {
+                return $fallback_caller->($uplevels + 2 + $Contextual::Return::uplevel)
+                    if $Contextual::Return::uplevel;
+                return $fallback_caller->($uplevels + 1);
+            }
+            else {
+                return CORE::caller($uplevels + 2 + $Contextual::Return::uplevel)
+                    if $Contextual::Return::uplevel;
+                return CORE::caller($uplevels + 1);
+            }
         }
     };
 
@@ -33,9 +50,38 @@ BEGIN {
         die _in_context(@_);
     };
 
+    # Scalar::Util::blessed()...
+    use Scalar::Util 'refaddr';
+
+    # Remember the current blessed()...
+    my $original_blessing = *Scalar::Util::blessed{CODE};
+
+    # ...and replace it...
+    *Scalar::Util::blessed = sub($) {
+        # Are we operating on a CRV???
+        my $attrs = $attrs_of{refaddr $_[0]};
+
+        # If not, use the original code...
+        goto &{$original_blessing} if !$attrs;
+
+        # Otherwise, find the appropriate scalar handler...
+        handler:
+        for my $context (qw( OBJREF LAZY REF SCALAR VALUE NONVOID DEFAULT )) {
+            my $handler = $attrs->{$context}
+                or next handler;
+
+            my $obj_ref = eval { $handler->(@{$attrs->{args}}) };
+
+            return $original_blessing->($obj_ref);
+        }
+
+        # Otherwise, simulate unblessed status...
+        return q{};
+    };
 }
 
-our $VERSION = '0.004003';
+
+our $VERSION = '0.004004';
 
 use warnings;
 use strict;
@@ -99,8 +145,6 @@ my @CONTEXTS = qw(
                     OBJREF
                         METHOD
 );
-
-my %attrs_of;
 
 my @ALL_EXPORTS = (
     @CONTEXTS,
@@ -876,7 +920,7 @@ sub _flag_self_ref_in {
     my $type = ref $data_ref;
     return if !$type;
     for my $value ( $type eq 'SCALAR' ? ${$data_ref} : @{$data_ref} ) {
-        no warnings 'numeric';
+        no warnings 'numeric', 'uninitialized';
         if ($value == $obj_ref) {
             $value = '<<<self-reference>>>';
         }
@@ -908,7 +952,7 @@ sub FREEZE {
 
         # Detect self-referential overloadings (to avoid infinite recursion)...
         {
-            no warnings 'numeric';
+            no warnings 'numeric', 'uninitialized';
             if (ref $retval eq 'REF' && ${$retval} == ${$self}) {
                 return { $context => "<<<self-reference>>>" };
             }
@@ -1626,7 +1670,7 @@ Contextual::Return - Create context-sensitive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004003
+This document describes Contextual::Return version 0.004004
 
 
 =head1 SYNOPSIS

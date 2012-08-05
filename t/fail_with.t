@@ -11,7 +11,7 @@ sub set_up_1 {
     $FAIL_SPEC_ref = {
         good => sub { BOOL { 0     } DEFAULT { croak 'good'} },
         bad  => sub { BOOL { 1     } DEFAULT { ()          } },
-        ugly => sub { BOOL { undef } DEFAULT { croak 'ugly'} },
+        ugly => sub { BOOL { undef } DEFAULT { confess 'ugly'} },
     };
 
     Contextual::Return::FAIL_WITH $FAIL_SPEC_ref, qw(oh be a good boy);

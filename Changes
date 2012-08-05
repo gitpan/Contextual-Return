@@ -115,3 +115,14 @@ Revision history for Contextual-Return
 
     - Patched failures.t to account from bleadperl changes
       (thanks Zefram!)
+
+
+0.004004  Sun Aug  5 17:46:56 2012
+
+    - Further patch to failures.t
+
+    - Added redefinition of Scalar::Util::blessed() to avoid nasty
+      surprises (thanks Andrew!)
+
+    - Added confess() and cluck() overrides
+      and fixed caller() override to set @DB::args when appropriate
