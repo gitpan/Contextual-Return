@@ -81,7 +81,7 @@ BEGIN {
 }
 
 
-our $VERSION = '0.004004';
+our $VERSION = '0.004005';
 
 use warnings;
 use strict;
@@ -1670,7 +1670,7 @@ Contextual::Return - Create context-sensitive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004004
+This document describes Contextual::Return version 0.004005
 
 
 =head1 SYNOPSIS

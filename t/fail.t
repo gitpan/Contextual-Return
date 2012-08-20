@@ -1,4 +1,4 @@
-use Contextual::Return;
+use Contextual::Return qw< FAIL FAIL_WITH >;
 
 use Test::More 'no_plan';
 

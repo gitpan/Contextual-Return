@@ -126,3 +126,9 @@ Revision history for Contextual-Return
 
     - Added confess() and cluck() overrides
       and fixed caller() override to set @DB::args when appropriate
+
+
+0.004005  Mon Aug 20 10:44:35 2012
+
+    - Further patch for t/confess.t
+      (Thanks, David!)
