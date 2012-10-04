@@ -59,7 +59,7 @@ BEGIN {
     # ...and replace it...
     *Scalar::Util::blessed = sub($) {
         # Are we operating on a CRV???
-        my $attrs = $attrs_of{refaddr $_[0]};
+        my $attrs = $attrs_of{refaddr $_[0] or q{}};
 
         # If not, use the original code...
         goto &{$original_blessing} if !$attrs;
@@ -81,7 +81,7 @@ BEGIN {
 }
 
 
-our $VERSION = '0.004005';
+our $VERSION = '0.004006';
 
 use warnings;
 use strict;
@@ -109,6 +109,10 @@ sub _in_context {
 
         # Track the call up the stack...
         $LOC = qq{at $file line $line}; 
+
+        # Ignore any @CARP_NOT'ed packages
+        next STACK_FRAME
+            if do { no strict 'refs'; *{$package.'::CARP_NOT'}{ARRAY}; };
 
         # Ignore transitions within original caller...
         next STACK_FRAME
@@ -315,7 +319,7 @@ for my $modifier_name (qw< STRICT FIXED ACTIVE >) {
     no strict 'refs';
     *{$modifier_name} = sub ($) {
         my ($crv) = @_;
-        my $attrs = $attrs_of{refaddr $crv};
+        my $attrs = $attrs_of{refaddr $crv or q{}};
 
         # Track context...
         my $wantarray = wantarray;
@@ -1670,7 +1674,7 @@ Contextual::Return - Create context-sensitive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004005
+This document describes Contextual::Return version 0.004006
 
 
 =head1 SYNOPSIS

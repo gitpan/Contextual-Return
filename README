@@ -1,4 +1,4 @@
-Contextual::Return version 0.004005
+Contextual::Return version 0.004006
 
 This module provides a collection of named blocks that allow a return
 statement to return different values depending on the context in which it's

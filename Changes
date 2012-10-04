@@ -132,3 +132,10 @@ Revision history for Contextual-Return
 
     - Further patch for t/confess.t
       (Thanks, David!)
+
+
+0.004006  Thu Oct  4 16:49:47 2012
+
+    - Circumvented annoying undef-as-key warnings in Perl 5.17+
+
+    - Honour @CARP_NOT's when reporting context

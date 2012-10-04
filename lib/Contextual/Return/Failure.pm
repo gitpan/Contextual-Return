@@ -104,10 +104,10 @@ sub _FAIL (;&) {
             if (ref $exception) {
                 my $message = "$exception";
                 $message =~ s/$/\n/;
-                die _in_context $message, "Attempted to use failure value"
+                die _in_context $message, "Attempted to use failure value";
             }
             else {
-                die _in_context $exception, "Attempted to use failure value"
+                die _in_context $exception, "Attempted to use failure value";
             }
         }
         METHOD {
