@@ -139,3 +139,10 @@ Revision history for Contextual-Return
     - Circumvented annoying undef-as-key warnings in Perl 5.17+
 
     - Honour @CARP_NOT's when reporting context
+
+
+0.004007  Fri Oct  5 23:05:05 2012
+
+    - Added BLESSED handler for better control over how blessed() lies
+
+    - Upgraded reimplementation of blessed() to make more sense

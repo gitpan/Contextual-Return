@@ -64,6 +64,11 @@ BEGIN {
         # If not, use the original code...
         goto &{$original_blessing} if !$attrs;
 
+        # Does this object have a BLESSED handler???
+        if (exists $attrs->{BLESSED}) {
+            return $attrs->{BLESSED}->(@{$attrs->{args}});
+        }
+
         # Otherwise, find the appropriate scalar handler...
         handler:
         for my $context (qw( OBJREF LAZY REF SCALAR VALUE NONVOID DEFAULT )) {
@@ -72,16 +77,17 @@ BEGIN {
 
             my $obj_ref = eval { $handler->(@{$attrs->{args}}) };
 
-            return $original_blessing->($obj_ref);
+            my $was_blessed = $original_blessing->($obj_ref);
+            return $was_blessed if $was_blessed;
         }
 
         # Otherwise, simulate unblessed status...
-        return q{};
+        return undef;
     };
 }
 
 
-our $VERSION = '0.004006';
+our $VERSION = '0.004007';
 
 use warnings;
 use strict;
@@ -148,6 +154,7 @@ my @CONTEXTS = qw(
                     GLOBREF
                     OBJREF
                         METHOD
+                        BLESSED
 );
 
 my @ALL_EXPORTS = (
@@ -155,7 +162,7 @@ my @ALL_EXPORTS = (
     qw(
         LAZY       RESULT      RVALUE      METHOD     FAIL
         FIXED      RECOVER     LVALUE      RETOBJ     FAIL_WITH
-        ACTIVE     CLEANUP     NVALUE      STRICT
+        ACTIVE     CLEANUP     NVALUE      STRICT     BLESSED
     )
 );
 
@@ -1674,7 +1681,7 @@ Contextual::Return - Create context-sensitive return values
 
 =head1 VERSION
 
-This document describes Contextual::Return version 0.004006
+This document describes Contextual::Return version 0.004007
 
 
 =head1 SYNOPSIS
@@ -2208,6 +2215,8 @@ interconversions) is:
                        |--< GLOBREF
                        |
                        `--< OBJREF <....... METHOD
+                               ^
+                               :........... BLESSED
 
 As before, each dashed arrow represents a fallback relationship. That
 is, if the required context specifier isn't available, the arrows are
@@ -2257,7 +2266,7 @@ referential contexts using a generic C<REF {...}> context block:
     print "There are ${get_todo_tasks()}...";       # Throws an exception
 
 
-=head2 Treating returns values as objects
+=head2 Treating return values as objects
 
 Normally, when a return value is treated as an object (i.e. has a method
 called on it), Contextual::Return invokes any C<OBJREF> handler that was
@@ -2303,6 +2312,70 @@ passed to the handler in C<$_>, and the method's argument list is passed
 Note that any methods not explicitly handled by the C<METHOD> handlers
 will still be delegated to the object returned by the C<OBJREF> handler
 (if it is also specified).
+
+
+=head2 Not treating return values as objects
+
+The use of C<OBJREF> and C<METHOD> are slightly complicated by the fact
+that contextual return values are themselves objects.
+
+For example, prior to version 0.4.4 of the module, if you passed a
+contextual return value to C<Scalar::Util::blessed()>, it always
+returned a true value (namely, the string: 'Contextual::Return::Value'),
+even if the return value had not specified handlers for C<OBJREF> or
+C<METHOD>.
+
+In other words, the I<implementation> of contextual return values (as
+objects) was getting in the way of the I<use> of contextual return
+values (as non-objects).
+
+So the module now also provides a C<BLESSED> handler, which allows you
+to explicitly control how contextual return values interact with
+C<Scalar::Util::blessed()>.
+
+If C<$crv> is a contextual return value, by default
+C<Scalar::Util::blessed($crv)> will now only return true if that return
+value has a C<OBJREF>, C<LAZY>, C<REF>, C<SCALAR>, C<VALUE>, C<NONVOID>,
+or C<DEFAULT> handler that in turn returns a blessed object.
+
+However if C<$crv> also provides a C<BLESSED> handler, C<blessed()>
+will return whatever that handler returns.
+
+This means:
+
+    sub simulate_non_object {
+        return BOOL { 1 }
+                NUM { 42 }
+    }
+
+    sub simulate_real_object {
+        return OBJREF { bless {}, 'My::Class' }
+                 BOOL { 1 }
+                  NUM { 42 }
+    }
+
+    sub simulate_faked_object {
+        return BLESSED { 'Foo' }
+                  BOOL { 1 }
+                   NUM { 42 }
+    }
+
+    sub simulate_previous_behaviour {
+        return BLESSED { 'Contextual::Return::Value' }
+                  BOOL { 1 }
+                   NUM { 42 }
+    }
+
+
+    say blessed( simulate_non_object()         );   # undef
+    say blessed( simulate_real_object()        );   # My::Class
+    say blessed( simulate_faked_object()       );   # Foo
+    say blessed( simulate_previous_behaviour() );   # Contextual::Return::Value
+
+Typically, you either want no C<BLESSED> handler (in which case
+contextual return values pretend not to be blessed objects), or you want
+C<BLESSED { 'Contextual::Return::Value' }> for backwards compatibility
+with pre-v0.4.7 behaviour.
 
 
 =head3 Preventing fallbacks
